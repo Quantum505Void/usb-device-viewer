@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-跨平台USB设备信息查看工具 - PySide6版本
+跨平台HID设备信息查看工具 - PySide6版本
 使用 PySide6 提供现代化的跨平台界面设计
 """
 
@@ -8,7 +8,7 @@ import sys
 import platform
 import threading
 from datetime import datetime
-from typing import List, Dict, Protocol, Optional, Iterator, Any, cast
+from typing import List, Dict, Optional, Any
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -44,71 +44,18 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QIcon, QAction, QFont, QColor, QPalette
 
 
-# 定义USB设备协议(类似TypeScript的interface)
-class USBDevice(Protocol):
-    """USB设备协议定义"""
-
-    idVendor: int
-    idProduct: int
-    iManufacturer: int
-    iProduct: int
-    iSerialNumber: int
-    bus: int
-    address: int
-    speed: Optional[int]
-    bDeviceClass: int
-    bDeviceSubClass: int
-    bDeviceProtocol: int
-    bNumConfigurations: int
-
-
-class USBCore(Protocol):
-    """USB Core模块协议"""
-
-    USBError: type[Exception]
-
-    def find(self, find_all: bool = False) -> Optional[Iterator[USBDevice]]: ...
-
-
-class USBUtil(Protocol):
-    """USB Util模块协议"""
-
-    def get_string(self, dev: USBDevice, index: int) -> str: ...
-
-
-class USBModule(Protocol):
-    """USB模块协议"""
-
-    core: USBCore
-    util: USBUtil
-
-
-# 运行时导入USB库
-HAS_PYUSB = False
+# 运行时导入HID库
+HAS_HID = False
+HID_BACKEND_INFO = ""
 
 try:
-    import usb.core
-    import usb.util
+    import hid
 
-    HAS_PYUSB = True
+    HAS_HID = True
+    HID_BACKEND_INFO = "HID 库已就绪"
 except ImportError:
-    # 创建兼容的Mock对象
-    class _MockUSBCore:
-        USBError = Exception
-
-        def find(self, find_all: bool = False) -> list:
-            return []
-
-    class _MockUSBUtil:
-        def get_string(self, dev: Any, index: int) -> str:
-            return ""
-
-    class _MockUSB:
-        core = _MockUSBCore()
-        util = _MockUSBUtil()
-
-    # 使用cast告诉类型检查器这符合协议
-    usb = cast(USBModule, _MockUSB())
+    hid = None
+    HID_BACKEND_INFO = "HID 库未安装"
 
 
 class MessageBox(QWidget):
@@ -468,6 +415,10 @@ class USBDeviceViewerPySide(QMainWindow):
 
         self.init_ui()
         self.init_timer()
+
+        # 显示后端信息
+        if HID_BACKEND_INFO:
+            print(f"HID 后端状态: {HID_BACKEND_INFO}")
 
         # 启动时自动扫描
         QTimer.singleShot(500, self.refresh_devices)
@@ -840,40 +791,18 @@ class USBDeviceViewerPySide(QMainWindow):
         item.setForeground(QColor("#e06c75"))
         self.device_list.addItem(item)
 
-    def process_usb_device(self, device_obj: Any) -> Dict[str, Any]:
-        """处理单个USB设备信息"""
-        dev = cast(USBDevice, device_obj)
+    def process_hid_device(self, device_dict: Dict) -> Dict[str, Any]:
+        """处理单个HID设备信息"""
         device: Dict[str, Any] = {}
 
         # 基本信息
-        device["vid"] = f"{dev.idVendor:04X}"
-        device["pid"] = f"{dev.idProduct:04X}"
+        device["vid"] = f"{device_dict.get('vendor_id', 0):04X}"
+        device["pid"] = f"{device_dict.get('product_id', 0):04X}"
 
-        # 尝试获取字符串描述符
-        try:
-            device["vendor"] = (
-                usb.util.get_string(dev, dev.iManufacturer)
-                if dev.iManufacturer
-                else "未知"
-            )
-        except:
-            device["vendor"] = "未知"
-
-        try:
-            device["product"] = (
-                usb.util.get_string(dev, dev.iProduct) if dev.iProduct else "未知"
-            )
-        except:
-            device["product"] = "未知"
-
-        try:
-            device["serial"] = (
-                usb.util.get_string(dev, dev.iSerialNumber)
-                if dev.iSerialNumber
-                else "N/A"
-            )
-        except:
-            device["serial"] = "N/A"
+        # HID库直接提供字符串信息，无需复杂处理
+        device["vendor"] = device_dict.get("manufacturer_string") or "未知"
+        device["product"] = device_dict.get("product_string") or "未知"
+        device["serial"] = device_dict.get("serial_number") or "N/A"
 
         # 构建详细信息
         raw_info = []
@@ -882,45 +811,39 @@ class USBDeviceViewerPySide(QMainWindow):
         raw_info.append(f"制造商: {device['vendor']}")
         raw_info.append(f"产品: {device['product']}")
         raw_info.append(f"序列号: {device['serial']}")
-        raw_info.append(f"总线: {dev.bus}")
-        raw_info.append(f"地址: {dev.address}")
-        raw_info.append(f"速度: {dev.speed}")
-        raw_info.append(f"设备类: {dev.bDeviceClass}")
-        raw_info.append(f"设备子类: {dev.bDeviceSubClass}")
-        raw_info.append(f"设备协议: {dev.bDeviceProtocol}")
-        raw_info.append(f"配置数: {dev.bNumConfigurations}")
+        raw_info.append(f"路径: {device_dict.get('path', 'N/A')}")
+        raw_info.append(f"接口号: {device_dict.get('interface_number', 'N/A')}")
+        raw_info.append(f"使用页: 0x{device_dict.get('usage_page', 0):04X}")
+        raw_info.append(f"使用ID: 0x{device_dict.get('usage', 0):04X}")
+        raw_info.append(f"发行版本: {device_dict.get('release_number', 0)}")
 
         device["raw_info"] = "\n".join(raw_info)
         return device
 
-    def scan_usb_pyusb(self) -> List[Dict]:
-        """使用PyUSB扫描USB设备"""
+    def scan_hid_devices(self) -> List[Dict]:
+        """使用HID库扫描设备"""
         devices = []
+
+        if not HAS_HID or hid is None:
+            return devices
+
         try:
-            usb_devices = usb.core.find(find_all=True)
-            if not usb_devices:
+            # 枚举所有HID设备
+            device_list = hid.enumerate()
+
+            if not device_list:
                 return devices
 
-            device_list = list(usb_devices)
-
-            # 使用线程池并行处理设备
-            from concurrent.futures import ThreadPoolExecutor, as_completed
-
-            with ThreadPoolExecutor(max_workers=min(10, len(device_list))) as executor:
-                future_to_device = {
-                    executor.submit(self.process_usb_device, dev): dev
-                    for dev in device_list
-                }
-
-                for future in as_completed(future_to_device):
-                    try:
-                        device = future.result()
-                        devices.append(device)
-                    except Exception as e:
-                        print(f"处理设备时出错: {e}")
+            # 处理每个设备
+            for dev_dict in device_list:
+                try:
+                    device = self.process_hid_device(dev_dict)
+                    devices.append(device)
+                except Exception as e:
+                    print(f"处理设备时出错: {e}")
 
         except Exception as e:
-            print(f"PyUSB扫描错误: {e}")
+            print(f"HID扫描错误: {e}")
 
         devices = self.filter_and_deduplicate_devices(devices)
         return devices
@@ -953,19 +876,19 @@ class USBDeviceViewerPySide(QMainWindow):
         return unique_devices
 
     def scan_usb_devices(self) -> List[Dict]:
-        """扫描USB设备"""
-        if not HAS_PYUSB:
-            print("错误: PyUSB未安装,请运行 pip install pyusb")
+        """扫描HID设备"""
+        if not HAS_HID:
+            print("错误: HID库未安装,请运行 pip install hid")
             return []
 
-        return self.scan_usb_pyusb()
+        return self.scan_hid_devices()
 
     def update_device_list(self):
         """更新设备列表显示"""
         self.device_list.clear()
 
         if not self.filtered_devices:
-            item = QListWidgetItem("🔌 未找到USB设备\n\n请连接USB设备后点击刷新按钮")
+            item = QListWidgetItem("🔌 未找到HID设备\n\n请连接HID设备后点击刷新按钮")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             font = QFont()
             font.setPointSize(13)
@@ -1075,7 +998,7 @@ PID: {device.get('pid', '未知')}
 
     def start_monitoring(self):
         """启动设备监控"""
-        if not HAS_PYUSB or self.monitoring:
+        if not HAS_HID or self.monitoring:
             return
 
         self.monitoring = True
