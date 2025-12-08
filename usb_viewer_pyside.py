@@ -1,0 +1,1152 @@
+#!/usr/bin/env python3
+"""
+跨平台USB设备信息查看工具 - PySide6版本
+使用 PySide6 提供现代化的跨平台界面设计
+"""
+
+import sys
+import platform
+import threading
+from datetime import datetime
+from typing import List, Dict, Protocol, Optional, Iterator, Any, cast
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QLabel,
+    QProgressBar,
+    QDialog,
+    QTextEdit,
+    QMessageBox,
+    QFrame,
+    QSplitter,
+    QStatusBar,
+    QToolBar,
+    QGroupBox,
+    QSizePolicy,
+)
+from PySide6.QtCore import (
+    Qt,
+    QTimer,
+    Signal,
+    QThread,
+    QSize,
+    QPropertyAnimation,
+    QEasingCurve,
+    Property,
+)
+from PySide6.QtGui import QIcon, QAction, QFont, QColor, QPalette
+
+
+# 定义USB设备协议(类似TypeScript的interface)
+class USBDevice(Protocol):
+    """USB设备协议定义"""
+
+    idVendor: int
+    idProduct: int
+    iManufacturer: int
+    iProduct: int
+    iSerialNumber: int
+    bus: int
+    address: int
+    speed: Optional[int]
+    bDeviceClass: int
+    bDeviceSubClass: int
+    bDeviceProtocol: int
+    bNumConfigurations: int
+
+
+class USBCore(Protocol):
+    """USB Core模块协议"""
+
+    USBError: type[Exception]
+
+    def find(self, find_all: bool = False) -> Optional[Iterator[USBDevice]]: ...
+
+
+class USBUtil(Protocol):
+    """USB Util模块协议"""
+
+    def get_string(self, dev: USBDevice, index: int) -> str: ...
+
+
+class USBModule(Protocol):
+    """USB模块协议"""
+
+    core: USBCore
+    util: USBUtil
+
+
+# 运行时导入USB库
+HAS_PYUSB = False
+
+try:
+    import usb.core
+    import usb.util
+
+    HAS_PYUSB = True
+except ImportError:
+    # 创建兼容的Mock对象
+    class _MockUSBCore:
+        USBError = Exception
+
+        def find(self, find_all: bool = False) -> list:
+            return []
+
+    class _MockUSBUtil:
+        def get_string(self, dev: Any, index: int) -> str:
+            return ""
+
+    class _MockUSB:
+        core = _MockUSBCore()
+        util = _MockUSBUtil()
+
+    # 使用cast告诉类型检查器这符合协议
+    usb = cast(USBModule, _MockUSB())
+
+
+class MessageBox(QWidget):
+    """类似 Element UI 的消息提示框"""
+
+    def __init__(self, message: str, msg_type: str = "info", parent=None):
+        super().__init__(
+            parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        self.message = message
+        self.msg_type = msg_type
+        self._opacity = 1.0
+
+        self.init_ui()
+
+        # 自动关闭定时器
+        QTimer.singleShot(3000, self.fade_out)
+
+    def init_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(10)
+
+        # 图标映射
+        icons = {"success": "✅", "info": "ℹ️", "warning": "⚠️", "error": "❌"}
+
+        # 颜色映射
+        colors = {
+            "success": "#98c379",
+            "info": "#61afef",
+            "warning": "#e5c07b",
+            "error": "#e06c75",
+        }
+
+        icon_label = QLabel(icons.get(self.msg_type, "ℹ️"))
+        icon_label.setFont(QFont("", 16))
+        icon_label.setStyleSheet("border: none;")
+        layout.addWidget(icon_label)
+
+        msg_label = QLabel(self.message)
+        msg_label.setFont(QFont("", 12))
+        msg_label.setStyleSheet("color: #abb2bf; border: none;")
+        layout.addWidget(msg_label)
+
+        # 设置样式
+        color = colors.get(self.msg_type, "#61afef")
+        self.setStyleSheet(
+            f"""
+            QWidget {{
+                background-color: #282c34;
+                border: 2px solid {color};
+                border-radius: 8px;
+            }}
+        """
+        )
+
+        self.adjustSize()
+
+    def fade_out(self):
+        """淡出动画"""
+        self.animation = QPropertyAnimation(self, b"windowOpacity")
+        self.animation.setDuration(300)
+        self.animation.setStartValue(1.0)
+        self.animation.setEndValue(0.0)
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.animation.finished.connect(self.close)
+        self.animation.start()
+
+    @staticmethod
+    def show_message(message: str, msg_type: str = "info", parent=None):
+        """显示消息"""
+        msg_box = MessageBox(message, msg_type, parent)
+
+        # 计算位置（屏幕顶部中央）
+        if parent:
+            parent_rect = parent.geometry()
+            x = parent_rect.x() + (parent_rect.width() - msg_box.width()) // 2
+            y = parent_rect.y() + 80
+        else:
+            screen = QApplication.primaryScreen().geometry()
+            x = (screen.width() - msg_box.width()) // 2
+            y = 80
+
+        msg_box.move(x, y)
+        msg_box.show()
+
+        return msg_box
+
+
+class ScanThread(QThread):
+    """后台扫描线程"""
+
+    finished = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, viewer):
+        super().__init__()
+        self.viewer = viewer
+
+    def run(self):
+        try:
+            devices = self.viewer.scan_usb_devices()
+            self.finished.emit(devices)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class MonitorThread(QThread):
+    """设备监控线程"""
+
+    device_changed = Signal(int, int)  # added_count, removed_count
+
+    def __init__(self, viewer):
+        super().__init__()
+        self.viewer = viewer
+        self.running = True
+        self.device_ids = set()
+
+    def run(self):
+        import time
+
+        while self.running:
+            try:
+                time.sleep(2)  # 每2秒检测一次
+
+                if self.viewer.is_scanning:
+                    continue
+
+                # 获取当前设备列表
+                current_devices = self.viewer.scan_usb_devices()
+                current_ids = {self.viewer.get_device_id(d) for d in current_devices}
+
+                # 检测变化
+                added = current_ids - self.device_ids
+                removed = self.device_ids - current_ids
+
+                if added or removed:
+                    self.viewer.devices = current_devices
+                    self.device_ids = current_ids
+                    self.device_changed.emit(len(added), len(removed))
+
+            except Exception as e:
+                print(f"监控错误: {e}")
+                if "shutdown" in str(e).lower() or "closed" in str(e).lower():
+                    break
+
+    def stop(self):
+        self.running = False
+
+
+class DeviceDetailsDialog(QDialog):
+    """设备详细信息对话框"""
+
+    def __init__(self, device: Dict, parent=None):
+        super().__init__(parent)
+        self.device = device
+        self.setWindowTitle(device.get("product", "设备详情"))
+        self.setMinimumSize(700, 600)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setStyleSheet("QDialog { background-color: #282c34; }")
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 标题区域
+        title_frame = QFrame()
+        title_frame.setStyleSheet(
+            """
+            QFrame {
+                background-color: #282c34;
+                border-radius: 8px;
+                padding: 15px;
+                border: 2px solid #528bff;
+            }
+        """
+        )
+        title_layout = QVBoxLayout(title_frame)
+
+        title_label = QLabel(f"📱 {self.device.get('product', '未知设备')}")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet("color: #61afef;")
+        title_layout.addWidget(title_label)
+
+        vendor_label = QLabel(f"🏢 {self.device.get('vendor', '未知厂商')}")
+        vendor_font = QFont()
+        vendor_font.setPointSize(12)
+        vendor_label.setFont(vendor_font)
+        vendor_label.setStyleSheet("color: #abb2bf;")
+        title_layout.addWidget(vendor_label)
+
+        layout.addWidget(title_frame)
+
+        # 识别信息区域
+        info_group = QGroupBox("🆔 识别信息")
+        info_group.setStyleSheet(
+            """
+            QGroupBox {
+                font-weight: bold;
+                font-size: 13px;
+                border: 2px solid #3e4451;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: #21252b;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 5px 10px;
+                color: #61afef;
+            }
+        """
+        )
+        info_layout = QVBoxLayout()
+
+        vid_label = QLabel(f"<b>VID:</b> {self.device.get('vid', '未知')}")
+        vid_label.setFont(QFont("", 11))
+        info_layout.addWidget(vid_label)
+
+        pid_label = QLabel(f"<b>PID:</b> {self.device.get('pid', '未知')}")
+        pid_label.setFont(QFont("", 11))
+        info_layout.addWidget(pid_label)
+
+        serial = self.device.get("serial", "N/A")
+        serial_label = QLabel(f"<b>序列号:</b> {serial}")
+        serial_label.setFont(QFont("", 11))
+        serial_label.setWordWrap(True)
+        info_layout.addWidget(serial_label)
+
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+
+        # 原始数据区域
+        raw_group = QGroupBox("📋 原始数据")
+        raw_group.setStyleSheet(
+            """
+            QGroupBox {
+                font-weight: bold;
+                font-size: 13px;
+                border: 2px solid #3e4451;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+                background-color: #21252b;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 5px 10px;
+                color: #61afef;
+            }
+        """
+        )
+        raw_layout = QVBoxLayout()
+
+        text_edit = QTextEdit()
+        text_edit.setPlainText(self.device.get("raw_info", "无详细信息"))
+        text_edit.setReadOnly(True)
+        text_edit.setFont(QFont("Monospace", 10))
+        text_edit.setStyleSheet(
+            """
+            QTextEdit {
+                background-color: #282c34;
+                border: 2px solid #3e4451;
+                border-radius: 5px;
+                padding: 10px;
+                color: #abb2bf;
+            }
+        """
+        )
+        raw_layout.addWidget(text_edit)
+        raw_group.setLayout(raw_layout)
+        layout.addWidget(raw_group)
+
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        copy_btn = QPushButton("📋 复制信息")
+        copy_btn.setMinimumSize(120, 35)
+        copy_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #61afef;
+                color: #282c34;
+                border: 2px solid #528bff;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #73bcf7;
+            }
+            QPushButton:pressed {
+                background-color: #4fa3e8;
+            }
+        """
+        )
+        copy_btn.clicked.connect(self.copy_info)
+        button_layout.addWidget(copy_btn)
+
+        close_btn = QPushButton("✖ 关闭")
+        close_btn.setMinimumSize(120, 35)
+        close_btn.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #5c6370;
+                color: #abb2bf;
+                border: 2px solid #4b5263;
+                border-radius: 5px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #6c6f7c;
+            }
+            QPushButton:pressed {
+                background-color: #4b5263;
+            }
+        """
+        )
+        close_btn.clicked.connect(self.accept)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def copy_info(self):
+        details = f"""VID: {self.device.get('vid', '未知')}
+PID: {self.device.get('pid', '未知')}
+供应商: {self.device.get('vendor', '未知')}
+产品名称: {self.device.get('product', '未知')}
+序列号: {self.device.get('serial', 'N/A')}"""
+        QApplication.clipboard().setText(details)
+        QMessageBox.information(self, "成功", "已复制到剪贴板")
+
+
+class USBDeviceViewerPySide(QMainWindow):
+    """USB设备查看器主窗口"""
+
+    def __init__(self):
+        super().__init__()
+        self.devices = []
+        self.filtered_devices = []
+        self.is_scanning = False
+        self.selected_device = None
+        self.scan_thread = None
+        self.monitor_thread = None
+        self.monitoring = False
+
+        self.init_ui()
+        self.init_timer()
+
+        # 启动时自动扫描
+        QTimer.singleShot(500, self.refresh_devices)
+
+    def init_ui(self):
+        """初始化用户界面"""
+        self.setWindowTitle("USB 设备查看器")
+        self.setMinimumSize(1200, 800)
+        self.setStyleSheet("QMainWindow { background-color: #282c34; }")
+
+        # 创建中心部件
+        central_widget = QWidget()
+        central_widget.setStyleSheet("QWidget { background-color: #282c34; }")
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+
+        # 创建工具栏
+        self.create_toolbar()
+
+        # 搜索栏和设备计数
+        search_layout = QHBoxLayout()
+        search_layout.setSpacing(15)
+
+        self.search_field = QLineEdit()
+        self.search_field.setPlaceholderText(
+            "🔍 搜索设备... (支持VID、PID、供应商、产品名称、序列号)"
+        )
+        self.search_field.setMinimumHeight(40)
+        self.search_field.setStyleSheet(
+            """
+            QLineEdit {
+                border: 2px solid #3e4451;
+                border-radius: 8px;
+                padding: 8px 15px;
+                font-size: 13px;
+                background-color: #282c34;
+                color: #abb2bf;
+            }
+            QLineEdit:focus {
+                border: 2px solid #61afef;
+                background-color: #21252b;
+            }
+            QLineEdit:hover {
+                border: 2px solid #528bff;
+                background-color: #2c313a;
+            }
+        """
+        )
+        self.search_field.textChanged.connect(self.filter_devices)
+        search_layout.addWidget(self.search_field)
+
+        self.device_count_label = QLabel("📊 设备数: 0")
+        count_font = QFont()
+        count_font.setBold(True)
+        count_font.setPointSize(13)
+        self.device_count_label.setFont(count_font)
+        self.device_count_label.setStyleSheet(
+            """
+            QLabel {
+                color: #61afef;
+                padding: 10px 20px;
+                background-color: #282c34;
+                border-radius: 8px;
+                border: 2px solid #528bff;
+            }
+        """
+        )
+        self.device_count_label.setMinimumWidth(150)
+        search_layout.addWidget(self.device_count_label)
+
+        main_layout.addLayout(search_layout)
+
+        # 设备列表
+        list_group = QGroupBox("📋 设备列表")
+        list_group.setStyleSheet(
+            """
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                border: 2px solid #3e4451;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 12px;
+                background-color: #21252b;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 5px 15px;
+                color: #61afef;
+            }
+        """
+        )
+        list_layout = QVBoxLayout()
+        list_layout.setContentsMargins(10, 10, 10, 10)
+
+        self.device_list = QListWidget()
+        self.device_list.itemDoubleClicked.connect(self.show_device_details)
+        self.device_list.setAlternatingRowColors(True)
+        self.device_list.setStyleSheet(
+            """
+            QListWidget {
+                border: 2px solid #3e4451;
+                border-radius: 8px;
+                background-color: #282c34;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 12px;
+                border-bottom: 1px solid #3e4451;
+                color: #abb2bf;
+                border-radius: 4px;
+                margin: 2px;
+                background-color: #282c34;
+            }
+            QListWidget::item:hover {
+                background-color: #2c313a;
+                color: #61afef;
+                border-left: 4px solid #528bff;
+            }
+            QListWidget::item:selected {
+                background-color: #3e4451;
+                color: #61afef;
+                font-weight: bold;
+                border-left: 5px solid #528bff;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #4b5263;
+            }
+        """
+        )
+        list_layout.addWidget(self.device_list)
+        list_group.setLayout(list_layout)
+        main_layout.addWidget(list_group)
+
+        # 创建状态栏
+        self.create_statusbar()
+
+        # 显示加载状态
+        self.show_loading_state()
+
+    def create_toolbar(self):
+        """创建工具栏"""
+        toolbar = QToolBar()
+        toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(28, 28))
+        toolbar.setStyleSheet(
+            """
+            QToolBar {
+                background-color: #21252b;
+                border-bottom: 3px solid #181a1f;
+                padding: 5px;
+                spacing: 10px;
+            }
+            QToolButton {
+                background-color: #282c34;
+                border: 2px solid #3e4451;
+                border-radius: 6px;
+                padding: 8px 15px;
+                font-weight: bold;
+                color: #61afef;
+                margin: 2px;
+            }
+            QToolButton:hover {
+                background-color: #2c313a;
+                border: 2px solid #528bff;
+                color: #61afef;
+            }
+            QToolButton:pressed {
+                background-color: #3e4451;
+                color: #61afef;
+            }
+        """
+        )
+        self.addToolBar(toolbar)
+
+        # 刷新按钮
+        refresh_action = QAction("🔄 刷新设备", self)
+        refresh_action.triggered.connect(self.refresh_devices)
+        toolbar.addAction(refresh_action)
+
+        toolbar.addSeparator()
+
+        # 复制信息按钮
+        copy_action = QAction("📋 复制信息", self)
+        copy_action.triggered.connect(self.copy_selected)
+        toolbar.addAction(copy_action)
+
+        # 导出数据按钮
+        export_action = QAction("💾 导出数据", self)
+        export_action.triggered.connect(self.export_all)
+        toolbar.addAction(export_action)
+
+        toolbar.addSeparator()
+
+        # 添加弹性空间
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
+
+        # 监控开关
+        monitor_label = QLabel("🔍 自动监控: ")
+        monitor_label.setStyleSheet(
+            """
+            QLabel {
+                font-weight: bold;
+                color: #abb2bf;
+                padding: 5px;
+            }
+        """
+        )
+        toolbar.addWidget(monitor_label)
+
+        self.monitor_button = QPushButton("● 启动")
+        self.monitor_button.setCheckable(True)
+        self.monitor_button.setChecked(True)
+        self.monitor_button.setMinimumSize(100, 35)
+        self.monitor_button.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #98c379;
+                color: #282c34;
+                border: 2px solid #7cb668;
+                border-radius: 6px;
+                padding: 8px 15px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #a9d48a;
+            }
+            QPushButton:checked {
+                background-color: #e06c75;
+                border: 2px solid #be5046;
+                color: #282c34;
+            }
+            QPushButton:checked:hover {
+                background-color: #e88388;
+            }
+        """
+        )
+        self.monitor_button.clicked.connect(self.toggle_monitoring)
+        toolbar.addWidget(self.monitor_button)
+
+        # 系统信息
+        sys_label = QLabel(f"  💻 {platform.system()} {platform.release()}  ")
+        sys_label.setStyleSheet(
+            """
+            QLabel {
+                color: #5c6370;
+                font-size: 11px;
+                padding: 5px 10px;
+                background-color: #282c34;
+                border-radius: 5px;
+            }
+        """
+        )
+        toolbar.addWidget(sys_label)
+
+    def create_statusbar(self):
+        """创建状态栏"""
+        self.statusbar = QStatusBar()
+        self.statusbar.setStyleSheet(
+            """
+            QStatusBar {
+                background-color: #21252b;
+                border-top: 3px solid #181a1f;
+                padding: 5px;
+            }
+            QStatusBar::item {
+                border: none;
+            }
+        """
+        )
+        self.setStatusBar(self.statusbar)
+
+        self.status_label = QLabel("✅ 就绪")
+        self.status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #abb2bf;
+                font-weight: bold;
+                padding: 5px 10px;
+                background-color: transparent;
+            }
+        """
+        )
+        self.statusbar.addWidget(self.status_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumWidth(250)
+        self.progress_bar.setMinimumHeight(20)
+        self.progress_bar.setStyleSheet(
+            """
+            QProgressBar {
+                border: 2px solid #3e4451;
+                border-radius: 5px;
+                text-align: center;
+                background-color: #282c34;
+                color: #abb2bf;
+            }
+            QProgressBar::chunk {
+                background-color: #61afef;
+                border-radius: 3px;
+            }
+        """
+        )
+        self.progress_bar.setVisible(False)
+        self.statusbar.addPermanentWidget(self.progress_bar)
+
+    def init_timer(self):
+        """初始化定时器,启动监控"""
+        QTimer.singleShot(1000, self.start_monitoring_if_enabled)
+
+    def start_monitoring_if_enabled(self):
+        """如果启用了监控,则启动"""
+        if self.monitor_button.isChecked():
+            self.start_monitoring()
+
+    def show_loading_state(self):
+        """显示加载状态"""
+        self.device_list.clear()
+        item = QListWidgetItem("⏳ 正在扫描设备,请稍候...")
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont()
+        font.setPointSize(14)
+        font.setBold(True)
+        item.setFont(font)
+        item.setForeground(QColor("#61afef"))
+        self.device_list.addItem(item)
+
+    def refresh_devices(self):
+        """刷新设备列表"""
+        if self.is_scanning:
+            return
+
+        self.is_scanning = True
+        self.status_label.setText("扫描中...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # 不确定进度
+
+        # 启动扫描线程
+        self.scan_thread = ScanThread(self)
+        self.scan_thread.finished.connect(self.on_scan_finished)
+        self.scan_thread.error.connect(self.on_scan_error)
+        self.scan_thread.start()
+
+    def on_scan_finished(self, devices):
+        """扫描完成回调"""
+        self.devices = devices
+        self.filtered_devices = self.devices.copy()
+        self.is_scanning = False
+        self.progress_bar.setVisible(False)
+        self.status_label.setText(f"就绪 - 已找到 {len(self.devices)} 个设备")
+        self.update_device_list()
+
+    def on_scan_error(self, error_msg):
+        """扫描错误回调"""
+        self.is_scanning = False
+        self.progress_bar.setVisible(False)
+        self.status_label.setText(f"扫描失败: {error_msg}")
+        self.device_list.clear()
+        item = QListWidgetItem(f"❌ 扫描失败: {error_msg}")
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont()
+        font.setPointSize(12)
+        item.setFont(font)
+        item.setForeground(QColor("#e06c75"))
+        self.device_list.addItem(item)
+
+    def process_usb_device(self, device_obj: Any) -> Dict[str, Any]:
+        """处理单个USB设备信息"""
+        dev = cast(USBDevice, device_obj)
+        device: Dict[str, Any] = {}
+
+        # 基本信息
+        device["vid"] = f"{dev.idVendor:04X}"
+        device["pid"] = f"{dev.idProduct:04X}"
+
+        # 尝试获取字符串描述符
+        try:
+            device["vendor"] = (
+                usb.util.get_string(dev, dev.iManufacturer)
+                if dev.iManufacturer
+                else "未知"
+            )
+        except:
+            device["vendor"] = "未知"
+
+        try:
+            device["product"] = (
+                usb.util.get_string(dev, dev.iProduct) if dev.iProduct else "未知"
+            )
+        except:
+            device["product"] = "未知"
+
+        try:
+            device["serial"] = (
+                usb.util.get_string(dev, dev.iSerialNumber)
+                if dev.iSerialNumber
+                else "N/A"
+            )
+        except:
+            device["serial"] = "N/A"
+
+        # 构建详细信息
+        raw_info = []
+        raw_info.append(f"供应商ID: {device['vid']}")
+        raw_info.append(f"产品ID: {device['pid']}")
+        raw_info.append(f"制造商: {device['vendor']}")
+        raw_info.append(f"产品: {device['product']}")
+        raw_info.append(f"序列号: {device['serial']}")
+        raw_info.append(f"总线: {dev.bus}")
+        raw_info.append(f"地址: {dev.address}")
+        raw_info.append(f"速度: {dev.speed}")
+        raw_info.append(f"设备类: {dev.bDeviceClass}")
+        raw_info.append(f"设备子类: {dev.bDeviceSubClass}")
+        raw_info.append(f"设备协议: {dev.bDeviceProtocol}")
+        raw_info.append(f"配置数: {dev.bNumConfigurations}")
+
+        device["raw_info"] = "\n".join(raw_info)
+        return device
+
+    def scan_usb_pyusb(self) -> List[Dict]:
+        """使用PyUSB扫描USB设备"""
+        devices = []
+        try:
+            usb_devices = usb.core.find(find_all=True)
+            if not usb_devices:
+                return devices
+
+            device_list = list(usb_devices)
+
+            # 使用线程池并行处理设备
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            with ThreadPoolExecutor(max_workers=min(10, len(device_list))) as executor:
+                future_to_device = {
+                    executor.submit(self.process_usb_device, dev): dev
+                    for dev in device_list
+                }
+
+                for future in as_completed(future_to_device):
+                    try:
+                        device = future.result()
+                        devices.append(device)
+                    except Exception as e:
+                        print(f"处理设备时出错: {e}")
+
+        except Exception as e:
+            print(f"PyUSB扫描错误: {e}")
+
+        devices = self.filter_and_deduplicate_devices(devices)
+        return devices
+
+    def filter_and_deduplicate_devices(self, devices: List[Dict]) -> List[Dict]:
+        """去除重复和无效设备"""
+        if not devices:
+            return devices
+
+        valid_devices = []
+        for device in devices:
+            vid = device.get("vid", "0000")
+            pid = device.get("pid", "0000")
+
+            if vid == "0000" and pid == "0000":
+                continue
+
+            valid_devices.append(device)
+
+        seen = {}
+        unique_devices = []
+
+        for device in valid_devices:
+            key = f"{device.get('vid', '')}:{device.get('pid', '')}:{device.get('serial', '')}"
+
+            if key not in seen:
+                seen[key] = True
+                unique_devices.append(device)
+
+        return unique_devices
+
+    def scan_usb_devices(self) -> List[Dict]:
+        """扫描USB设备"""
+        if not HAS_PYUSB:
+            print("错误: PyUSB未安装,请运行 pip install pyusb")
+            return []
+
+        return self.scan_usb_pyusb()
+
+    def update_device_list(self):
+        """更新设备列表显示"""
+        self.device_list.clear()
+
+        if not self.filtered_devices:
+            item = QListWidgetItem("🔌 未找到USB设备\n\n请连接USB设备后点击刷新按钮")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            font = QFont()
+            font.setPointSize(13)
+            font.setBold(True)
+            item.setFont(font)
+            item.setForeground(QColor("#5c6370"))
+            self.device_list.addItem(item)
+        else:
+            for idx, device in enumerate(self.filtered_devices, 1):
+                product = device.get("product", "未知设备")
+                vendor = device.get("vendor", "未知厂商")
+                vid = device.get("vid", "?")
+                pid = device.get("pid", "?")
+                serial = device.get("serial", "")
+
+                display_text = (
+                    f"📱 {product}\n"
+                    f"   🏢 {vendor}\n"
+                    f"   🆔 VID: {vid}  •  PID: {pid}"
+                )
+                if serial and serial != "N/A":
+                    display_text += f"  •  S/N: {serial[:16]}..."
+
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.ItemDataRole.UserRole, device)
+                font = QFont()
+                font.setPointSize(10)
+                item.setFont(font)
+                self.device_list.addItem(item)
+
+        self.device_count_label.setText(f"📊 设备数: {len(self.filtered_devices)}")
+
+    def filter_devices(self):
+        """过滤设备列表"""
+        search_text = self.search_field.text().lower()
+
+        if not search_text:
+            self.filtered_devices = self.devices.copy()
+        else:
+            self.filtered_devices = [
+                device
+                for device in self.devices
+                if search_text in str(device.get("vid", "")).lower()
+                or search_text in str(device.get("pid", "")).lower()
+                or search_text in str(device.get("vendor", "")).lower()
+                or search_text in str(device.get("product", "")).lower()
+                or search_text in str(device.get("serial", "")).lower()
+            ]
+
+        self.update_device_list()
+
+    def show_device_details(self, item):
+        """显示设备详细信息"""
+        device = item.data(Qt.ItemDataRole.UserRole)
+        if device:
+            self.selected_device = device
+            dialog = DeviceDetailsDialog(device, self)
+            dialog.exec()
+
+    def copy_selected(self):
+        """复制选中的设备信息"""
+        current_item = self.device_list.currentItem()
+        if current_item:
+            device = current_item.data(Qt.ItemDataRole.UserRole)
+            if device:
+                details = f"""VID: {device.get('vid', '未知')}
+PID: {device.get('pid', '未知')}
+供应商: {device.get('vendor', '未知')}
+产品名称: {device.get('product', '未知')}
+序列号: {device.get('serial', 'N/A')}"""
+                QApplication.clipboard().setText(details)
+                self.status_label.setText("✅ 已复制到剪贴板")
+                MessageBox.show_message("已复制到剪贴板", "success", self)
+        else:
+            QMessageBox.warning(self, "警告", "请先选择一个设备")
+
+    def export_all(self):
+        """导出所有设备信息"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"usb_devices_{timestamp}.txt"
+
+        try:
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(f"USB 设备列表\n")
+                f.write(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"系统信息: {platform.system()} {platform.release()}\n")
+                f.write(f"{'=' * 80}\n\n")
+
+                for idx, device in enumerate(self.devices, 1):
+                    f.write(f"设备 #{idx}\n")
+                    f.write(f"VID: {device.get('vid', '未知')}\n")
+                    f.write(f"PID: {device.get('pid', '未知')}\n")
+                    f.write(f"供应商: {device.get('vendor', '未知')}\n")
+                    f.write(f"产品: {device.get('product', '未知')}\n")
+                    f.write(f"序列号: {device.get('serial', 'N/A')}\n")
+                    f.write(f"{'-' * 80}\n\n")
+
+            self.status_label.setText(f"✅ 已导出到 {filename}")
+            MessageBox.show_message(f"已导出到 {filename}", "success", self)
+        except Exception as e:
+            self.status_label.setText(f"❌ 导出失败: {e}")
+            MessageBox.show_message(f"导出失败: {e}", "error", self)
+
+    def get_device_id(self, device: Dict) -> str:
+        """生成设备唯一标识"""
+        return f"{device.get('vid', '')}:{device.get('pid', '')}:{device.get('serial', '')}"
+
+    def start_monitoring(self):
+        """启动设备监控"""
+        if not HAS_PYUSB or self.monitoring:
+            return
+
+        self.monitoring = True
+        self.monitor_thread = MonitorThread(self)
+        self.monitor_thread.device_ids = {self.get_device_id(d) for d in self.devices}
+        self.monitor_thread.device_changed.connect(self.on_device_changed)
+        self.monitor_thread.start()
+        self.status_label.setText("🔄 已启动自动监控")
+
+    def stop_monitoring(self):
+        """停止设备监控"""
+        if self.monitor_thread:
+            self.monitoring = False
+            self.monitor_thread.stop()
+            self.monitor_thread.wait()
+            self.monitor_thread = None
+            self.status_label.setText("⏸️ 已停止自动监控")
+
+    def toggle_monitoring(self):
+        """切换监控状态"""
+        if self.monitor_button.isChecked():
+            self.monitor_button.setText("● 停止")
+            self.start_monitoring()
+        else:
+            self.monitor_button.setText("● 启动")
+            self.stop_monitoring()
+
+    def on_device_changed(self, added_count, removed_count):
+        """设备变化回调"""
+        # 更新过滤后的设备列表
+        if self.search_field.text():
+            self.filter_devices()
+        else:
+            self.filtered_devices = self.devices.copy()
+
+        self.update_device_list()
+
+        # 显示通知
+        if added_count > 0 and removed_count > 0:
+            message = f"检测到 {added_count} 个新设备，移除了 {removed_count} 个设备"
+            self.status_label.setText(f"🔌 {message}")
+            MessageBox.show_message(message, "info", self)
+        elif added_count > 0:
+            message = f"检测到 {added_count} 个新设备"
+            self.status_label.setText(f"🔌 {message}")
+            MessageBox.show_message(message, "success", self)
+        elif removed_count > 0:
+            message = f"移除了 {removed_count} 个设备"
+            self.status_label.setText(f"🔌 {message}")
+            MessageBox.show_message(message, "warning", self)
+
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        self.stop_monitoring()
+        event.accept()
+
+
+def main():
+    """主函数"""
+    app = QApplication(sys.argv)
+    app.setApplicationName("USB 设备查看器")
+    app.setOrganizationName("USB Viewer Team")
+
+    # 设置应用样式
+    app.setStyle("Fusion")
+
+    window = USBDeviceViewerPySide()
+    window.show()
+
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
