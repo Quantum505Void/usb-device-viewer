@@ -1,54 +1,40 @@
 @echo off
-REM Windows 打包脚本
+REM USB Device Viewer - Nuitka 构建脚本 (Windows)
+REM 此脚本调用通用的 build.py 进行编译
+chcp 65001 >nul
 
-echo 🚀 HID设备查看器 - Windows 打包脚本
-echo ==========================================
-
-REM 检查虚拟环境
-if not exist ".venv" (
-    echo ❌ 错误: 虚拟环境不存在
-    echo 请先运行: uv venv
-    echo 然后安装依赖: uv pip install -e .
+REM 检查 Python 是否可用
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [错误] 未找到 Python
+    echo 请先安装 Python 3.10 或更高版本
+    echo 下载地址: https://www.python.org/downloads/
     pause
     exit /b 1
 )
 
-echo ✅ 找到虚拟环境
-echo.
-
-REM 检查 uv
-where uv >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ❌ 错误: 找不到 uv
-    echo 请先安装 uv
+REM 检查 build.py 是否存在
+if not exist "build.py" (
+    echo [错误] 未找到 build.py
+    echo 请确保在项目根目录运行此脚本
     pause
     exit /b 1
 )
 
-REM 检查 Python 版本
-uv run python --version
+REM 调用通用构建脚本
+echo [信息] 调用通用构建脚本...
+echo.
+python build.py
 
-REM 检查PyInstaller是否安装
-uv run python -c "import PyInstaller" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo ❌ 错误: 找不到 PyInstaller 模块
-    echo 正在安装 PyInstaller...
-    uv pip install pyinstaller
-    if %errorlevel% neq 0 (
-        echo ❌ 安装失败
-        pause
-        exit /b 1
-    )
+REM 保存返回码
+set BUILD_EXIT_CODE=%errorlevel%
+
+echo.
+if %BUILD_EXIT_CODE% equ 0 (
+    echo [成功] 构建完成！
+) else (
+    echo [错误] 构建失败！
 )
 
-echo.
-echo 📦 开始打包...
-echo.
-
-REM 运行打包脚本
-uv run python build.py
-
-echo.
-echo ✅ 完成！
 pause
+exit /b %BUILD_EXIT_CODE%

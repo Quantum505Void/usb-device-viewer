@@ -413,6 +413,9 @@ class USBDeviceViewerPySide(QMainWindow):
         self.monitor_thread = None
         self.monitoring = False
 
+        # 设置窗口图标
+        self.set_window_icon()
+
         self.init_ui()
         self.init_timer()
 
@@ -422,6 +425,52 @@ class USBDeviceViewerPySide(QMainWindow):
 
         # 启动时自动扫描
         QTimer.singleShot(500, self.refresh_devices)
+
+    def set_window_icon(self):
+        """设置窗口图标（支持 Briefcase 打包）"""
+        import os
+        from pathlib import Path
+
+        # 尝试多个可能的图标路径
+        icon_paths = []
+
+        # 1. Briefcase 资源路径（优先）
+        try:
+            from importlib.resources import files
+
+            resource_path = files("usbviewer")
+            icon_paths.extend(
+                [
+                    resource_path / "icon.svg",
+                    resource_path / "icon.png",
+                    resource_path / "icon.ico",
+                ]
+            )
+        except (ImportError, TypeError):
+            pass
+
+        # 2. 打包后的路径
+        if getattr(sys, "frozen", False):
+            base_path = Path(sys.argv[0]).parent
+        else:
+            base_path = Path(__file__).parent
+
+        icon_paths.extend(
+            [
+                base_path / "icon.svg",
+                base_path / "icon.png",
+                base_path / "icon.ico",
+                base_path.parent / "icon.svg",  # 项目根目录
+                base_path.parent / "icon.png",
+                base_path.parent / "icon.ico",
+            ]
+        )
+
+        # 尝试加载第一个存在的图标
+        for icon_path in icon_paths:
+            if Path(icon_path).exists():
+                self.setWindowIcon(QIcon(str(icon_path)))
+                return
 
     def init_ui(self):
         """初始化用户界面"""

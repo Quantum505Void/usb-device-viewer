@@ -1,49 +1,27 @@
 #!/bin/bash
-# Linux/macOS 打包脚本
+# USB Device Viewer - Nuitka 构建脚本 (Linux/macOS)
+# 此脚本调用通用的 build.py 进行编译
 
-echo "🚀 HID设备查看器 - Linux/macOS 打包脚本"
-echo "=========================================="
+set -e
 
-# 检查虚拟环境
-if [ ! -d ".venv" ]; then
-    echo "❌ 错误: 虚拟环境不存在"
-    echo "请先运行: python3 -m venv .venv"
-    echo "然后激活: source .venv/bin/activate"
-    echo "安装依赖: pip install -e ."
+# 检查 Python3 是否可用
+if ! command -v python3 &> /dev/null; then
+    echo "❌ 错误: 未找到 python3"
+    echo "请先安装 Python 3.10 或更高版本"
     exit 1
 fi
 
-echo "✅ 找到虚拟环境"
-echo ""
-
-# 检查 uv
-if ! command -v uv &> /dev/null; then
-    echo "❌ 错误: 找不到 uv"
-    echo "请先安装 uv: curl -LsSf https://astral.sh/uv/install.sh | sh"
+# 检查 build.py 是否存在
+if [ ! -f "build.py" ]; then
+    echo "❌ 错误: 未找到 build.py"
+    echo "请确保在项目根目录运行此脚本"
     exit 1
 fi
 
-# 检查Python版本
-uv run python --version
-
-# 检查是否安装了PyInstaller
-if ! uv run python -c "import PyInstaller" &> /dev/null; then
-    echo ""
-    echo "❌ 错误: 找不到 PyInstaller 模块"
-    echo "正在安装 PyInstaller..."
-    uv pip install pyinstaller
-    if [ $? -ne 0 ]; then
-        echo "❌ 安装失败"
-        exit 1
-    fi
-fi
-
+# 调用通用构建脚本
+echo "🚀 调用通用构建脚本..."
 echo ""
-echo "📦 开始打包..."
-echo ""
+python3 build.py
 
-# 运行打包脚本
-uv run python build.py
-
-echo ""
-echo "✅ 完成！"
+# 退出时使用 build.py 的返回码
+exit $?

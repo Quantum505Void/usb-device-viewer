@@ -1,46 +1,27 @@
 [project]
 name = "usb-device-viewer"
 version = "3.0.0"
-description = "跨平台USB设备信息查看工具 - 使用PySide6构建的现代化界面"
-readme = "README.md"
+description = "跨平台USB设备信息查看工具"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
 authors = [
-    { name = "USB Viewer Developer", email = "dev@example.com" }
-]
-keywords = ["usb", "device", "viewer", "pyside6", "qt", "cross-platform"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: System :: Hardware",
-    "Topic :: Utilities",
+    { name = "Wang Yu", email = "moke521_wang@163.com" }
 ]
 
+# 运行时依赖
 dependencies = [
     "PySide6>=6.6.0",
     "hidapi>=0.14.0",
 ]
 
+# 可选依赖
+[project.optional-dependencies]
+build = [
+    "nuitka>=2.0",
+    "ordered-set>=4.1.0",
+]
+
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["usb_viewer_pyside.py"]
-
-# 应用入口点配置
-[project.scripts]
-usb-viewer = "usb_viewer_pyside:main"
-
-# 应用元数据
-[tool.app]
-name = "USB Device Viewer"
-company = "USB Viewer Team"
-copyright = "Copyright (C) 2025 USB Viewer Team"
-description = "查看和管理USB设备的跨平台工具"

@@ -14,3 +14,5 @@ Data/
 # Logs
 logs/
 *.log
+
+*.lock
