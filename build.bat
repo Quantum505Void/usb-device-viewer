@@ -1,17 +1,22 @@
 @echo off
-REM USB Device Viewer - Nuitka 构建脚本 (Windows)
+REM HID Device Viewer - 构建脚本 (Windows)
 REM 此脚本调用通用的 build.py 进行编译
 chcp 65001 >nul
 
-REM 检查 Python 是否可用
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [错误] 未找到 Python
-    echo 请先安装 Python 3.10 或更高版本
-    echo 下载地址: https://www.python.org/downloads/
+REM 检查虚拟环境
+if not exist ".venv\Scripts\python.exe" (
+    echo [错误] 未找到虚拟环境
+    echo 请先运行: uv venv
+    echo 然后安装依赖: uv pip install -e .
     pause
     exit /b 1
 )
+
+echo [信息] 找到虚拟环境
+set PYTHON_EXE=.venv\Scripts\python.exe
+
+REM 检查 Python 版本
+%PYTHON_EXE% --version
 
 REM 检查 build.py 是否存在
 if not exist "build.py" (
@@ -24,7 +29,7 @@ if not exist "build.py" (
 REM 调用通用构建脚本
 echo [信息] 调用通用构建脚本...
 echo.
-python build.py
+%PYTHON_EXE% build.py
 
 REM 保存返回码
 set BUILD_EXIT_CODE=%errorlevel%
