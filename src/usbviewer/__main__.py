@@ -6,9 +6,8 @@
 
 import sys
 import platform
-import threading
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -78,8 +77,8 @@ class MessageBox(QWidget):
 
     def init_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 12, 20, 12)
+        layout.setSpacing(12)
 
         # 图标映射
         icons = {"success": "✅", "info": "ℹ️", "warning": "⚠️", "error": "❌"}
@@ -93,12 +92,15 @@ class MessageBox(QWidget):
         }
 
         icon_label = QLabel(icons.get(self.msg_type, "ℹ️"))
-        icon_label.setFont(QFont("", 16))
+        icon_font = QFont("Segoe UI Emoji", 18)
+        icon_label.setFont(icon_font)
         icon_label.setStyleSheet("border: none;")
         layout.addWidget(icon_label)
 
         msg_label = QLabel(self.message)
-        msg_label.setFont(QFont("", 12))
+        msg_font = QFont("Microsoft YaHei UI", 11)
+        msg_font.setWeight(QFont.Weight.Medium)
+        msg_label.setFont(msg_font)
         msg_label.setStyleSheet("color: #abb2bf; border: none;")
         layout.addWidget(msg_label)
 
@@ -107,9 +109,9 @@ class MessageBox(QWidget):
         self.setStyleSheet(
             f"""
             QWidget {{
-                background-color: #282c34;
+                background-color: #1e2127;
                 border: 2px solid {color};
-                border-radius: 8px;
+                border-radius: 10px;
             }}
         """
         )
@@ -168,7 +170,9 @@ class ScanThread(QThread):
 class MonitorThread(QThread):
     """设备监控线程"""
 
-    device_changed = Signal(int, int)  # added_count, removed_count
+    device_changed = Signal(
+        int, int, list
+    )  # added_count, removed_count, added_device_ids
 
     def __init__(self, viewer):
         super().__init__()
@@ -197,7 +201,7 @@ class MonitorThread(QThread):
                 if added or removed:
                     self.viewer.devices = current_devices
                     self.device_ids = current_ids
-                    self.device_changed.emit(len(added), len(removed))
+                    self.device_changed.emit(len(added), len(removed), list(added))
 
             except Exception as e:
                 print(f"监控错误: {e}")
@@ -219,10 +223,10 @@ class DeviceDetailsDialog(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        self.setStyleSheet("QDialog { background-color: #282c34; }")
+        self.setStyleSheet("QDialog { background-color: #1e2127; }")
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(18)
 
         # 标题区域
         title_frame = QFrame()
@@ -230,65 +234,78 @@ class DeviceDetailsDialog(QDialog):
             """
             QFrame {
                 background-color: #282c34;
-                border-radius: 8px;
-                padding: 15px;
+                border-radius: 10px;
+                padding: 18px;
                 border: 2px solid #528bff;
             }
         """
         )
         title_layout = QVBoxLayout(title_frame)
 
-        title_label = QLabel(f"📱 {self.device.get('product', '未知设备')}")
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
+        # 蓝牙标识
+        bluetooth_prefix = ""
+        if self.device.get("is_bluetooth", False):
+            bluetooth_prefix = "🔵 [蓝牙HID]  "
+
+        title_label = QLabel(f"{bluetooth_prefix}📱 {self.device.get('product', '未知设备')}")
+        title_font = QFont("Microsoft YaHei UI", 16)
+        title_font.setWeight(QFont.Weight.Bold)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #61afef;")
+        title_label.setStyleSheet("color: #61afef; border: none;")
         title_layout.addWidget(title_label)
 
         vendor_label = QLabel(f"🏢 {self.device.get('vendor', '未知厂商')}")
-        vendor_font = QFont()
-        vendor_font.setPointSize(12)
+        vendor_font = QFont("Microsoft YaHei UI", 12)
+        vendor_font.setWeight(QFont.Weight.Medium)
         vendor_label.setFont(vendor_font)
-        vendor_label.setStyleSheet("color: #abb2bf;")
+        vendor_label.setStyleSheet("color: #abb2bf; border: none;")
         title_layout.addWidget(vendor_label)
 
         layout.addWidget(title_frame)
 
         # 识别信息区域
         info_group = QGroupBox("🆔 识别信息")
+        info_group_font = QFont("Microsoft YaHei UI", 13)
+        info_group_font.setWeight(QFont.Weight.Bold)
+        info_group.setFont(info_group_font)
         info_group.setStyleSheet(
             """
             QGroupBox {
-                font-weight: bold;
-                font-size: 13px;
                 border: 2px solid #3e4451;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #21252b;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 12px;
+                background-color: #282c34;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 5px 10px;
+                padding: 6px 12px;
                 color: #61afef;
+            }
+            QLabel {
+                color: #abb2bf;
+                border: none;
             }
         """
         )
         info_layout = QVBoxLayout()
+        info_layout.setSpacing(10)
 
         vid_label = QLabel(f"<b>VID:</b> {self.device.get('vid', '未知')}")
-        vid_label.setFont(QFont("", 11))
+        vid_font = QFont("Microsoft YaHei UI", 11)
+        vid_label.setFont(vid_font)
         info_layout.addWidget(vid_label)
 
         pid_label = QLabel(f"<b>PID:</b> {self.device.get('pid', '未知')}")
-        pid_label.setFont(QFont("", 11))
+        pid_font = QFont("Microsoft YaHei UI", 11)
+        pid_label.setFont(pid_font)
         info_layout.addWidget(pid_label)
 
         serial = self.device.get("serial", "N/A")
         serial_label = QLabel(f"<b>序列号:</b> {serial}")
-        serial_label.setFont(QFont("", 11))
+        serial_font = QFont("Microsoft YaHei UI", 11)
+        serial_label.setFont(serial_font)
         serial_label.setWordWrap(True)
         info_layout.addWidget(serial_label)
 
@@ -297,21 +314,22 @@ class DeviceDetailsDialog(QDialog):
 
         # 原始数据区域
         raw_group = QGroupBox("📋 原始数据")
+        raw_group_font = QFont("Microsoft YaHei UI", 13)
+        raw_group_font.setWeight(QFont.Weight.Bold)
+        raw_group.setFont(raw_group_font)
         raw_group.setStyleSheet(
             """
             QGroupBox {
-                font-weight: bold;
-                font-size: 13px;
                 border: 2px solid #3e4451;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #21252b;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 12px;
+                background-color: #282c34;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 5px 10px;
+                padding: 6px 12px;
                 color: #61afef;
             }
         """
@@ -321,15 +339,20 @@ class DeviceDetailsDialog(QDialog):
         text_edit = QTextEdit()
         text_edit.setPlainText(self.device.get("raw_info", "无详细信息"))
         text_edit.setReadOnly(True)
-        text_edit.setFont(QFont("Monospace", 10))
+        text_edit_font = QFont("Consolas", 10)
+        text_edit.setFont(text_edit_font)
         text_edit.setStyleSheet(
             """
             QTextEdit {
-                background-color: #282c34;
+                background-color: #1e2127;
                 border: 2px solid #3e4451;
-                border-radius: 5px;
-                padding: 10px;
+                border-radius: 8px;
+                padding: 12px;
                 color: #abb2bf;
+                line-height: 1.6;
+            }
+            QTextEdit:focus {
+                border: 2px solid #528bff;
             }
         """
         )
@@ -342,16 +365,18 @@ class DeviceDetailsDialog(QDialog):
         button_layout.addStretch()
 
         copy_btn = QPushButton("📋 复制信息")
-        copy_btn.setMinimumSize(120, 35)
+        copy_btn.setMinimumSize(130, 40)
+        copy_btn_font = QFont("Microsoft YaHei UI", 11)
+        copy_btn_font.setWeight(QFont.Weight.Bold)
+        copy_btn.setFont(copy_btn_font)
         copy_btn.setStyleSheet(
             """
             QPushButton {
                 background-color: #61afef;
-                color: #282c34;
-                border: 2px solid #528bff;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
+                color: #1e2127;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
             }
             QPushButton:hover {
                 background-color: #73bcf7;
@@ -365,16 +390,18 @@ class DeviceDetailsDialog(QDialog):
         button_layout.addWidget(copy_btn)
 
         close_btn = QPushButton("✖ 关闭")
-        close_btn.setMinimumSize(120, 35)
+        close_btn.setMinimumSize(130, 40)
+        close_btn_font = QFont("Microsoft YaHei UI", 11)
+        close_btn_font.setWeight(QFont.Weight.Bold)
+        close_btn.setFont(close_btn_font)
         close_btn.setStyleSheet(
             """
             QPushButton {
                 background-color: #5c6370;
-                color: #abb2bf;
-                border: 2px solid #4b5263;
-                border-radius: 5px;
-                padding: 8px 16px;
-                font-weight: bold;
+                color: #e6e6e6;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
             }
             QPushButton:hover {
                 background-color: #6c6f7c;
@@ -462,16 +489,19 @@ class USBDeviceViewerPySide(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("USB 设备查看器")
-        self.setMinimumSize(1200, 800)
-        self.setStyleSheet("QMainWindow { background-color: #282c34; }")
+        self.setMinimumSize(1280, 860)
+
+        self.setStyleSheet(
+            "QMainWindow { background-color: #1e2127; font-family: 'Microsoft YaHei UI', 'Segoe UI', sans-serif; }"
+        )
 
         # 创建中心部件
         central_widget = QWidget()
-        central_widget.setStyleSheet("QWidget { background-color: #282c34; }")
+        central_widget.setStyleSheet("QWidget { background-color: #1e2127; }")
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(16, 12, 16, 16)
+        main_layout.setSpacing(14)
 
         # 创建工具栏
         self.create_toolbar()
@@ -484,24 +514,28 @@ class USBDeviceViewerPySide(QMainWindow):
         self.search_field.setPlaceholderText(
             "🔍 搜索设备... (支持VID、PID、供应商、产品名称、序列号)"
         )
-        self.search_field.setMinimumHeight(40)
+        self.search_field.setMinimumHeight(46)
+        search_font = QFont("Microsoft YaHei UI", 11)
+        self.search_field.setFont(search_font)
         self.search_field.setStyleSheet(
             """
             QLineEdit {
                 border: 2px solid #3e4451;
-                border-radius: 8px;
-                padding: 8px 15px;
-                font-size: 13px;
+                border-radius: 10px;
+                padding: 10px 18px;
                 background-color: #282c34;
-                color: #abb2bf;
+                color: #e6e6e6;
             }
             QLineEdit:focus {
                 border: 2px solid #61afef;
-                background-color: #21252b;
+                background-color: #2c313a;
             }
             QLineEdit:hover {
                 border: 2px solid #528bff;
-                background-color: #2c313a;
+                background-color: #252931;
+            }
+            QLineEdit::placeholder {
+                color: #5c6370;
             }
         """
         )
@@ -509,67 +543,70 @@ class USBDeviceViewerPySide(QMainWindow):
         search_layout.addWidget(self.search_field)
 
         self.device_count_label = QLabel("📊 设备数: 0")
-        count_font = QFont()
-        count_font.setBold(True)
-        count_font.setPointSize(13)
+        count_font = QFont("Microsoft YaHei UI", 13)
+        count_font.setWeight(QFont.Weight.Bold)
         self.device_count_label.setFont(count_font)
         self.device_count_label.setStyleSheet(
             """
             QLabel {
                 color: #61afef;
-                padding: 10px 20px;
+                padding: 12px 24px;
                 background-color: #282c34;
-                border-radius: 8px;
+                border-radius: 10px;
                 border: 2px solid #528bff;
             }
         """
         )
-        self.device_count_label.setMinimumWidth(150)
+        self.device_count_label.setMinimumWidth(160)
         search_layout.addWidget(self.device_count_label)
 
         main_layout.addLayout(search_layout)
 
         # 设备列表
         list_group = QGroupBox("📋 设备列表")
+        list_group_font = QFont("Microsoft YaHei UI", 14)
+        list_group_font.setWeight(QFont.Weight.Bold)
+        list_group.setFont(list_group_font)
         list_group.setStyleSheet(
             """
             QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
                 border: 2px solid #3e4451;
-                border-radius: 10px;
-                margin-top: 12px;
-                padding-top: 12px;
-                background-color: #21252b;
+                border-radius: 12px;
+                margin-top: 14px;
+                padding-top: 14px;
+                background-color: #282c34;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 5px 15px;
+                padding: 6px 16px;
                 color: #61afef;
             }
         """
         )
         list_layout = QVBoxLayout()
-        list_layout.setContentsMargins(10, 10, 10, 10)
+        list_layout.setContentsMargins(12, 12, 12, 12)
 
         self.device_list = QListWidget()
         self.device_list.itemDoubleClicked.connect(self.show_device_details)
         self.device_list.setAlternatingRowColors(True)
+        list_widget_font = QFont("Microsoft YaHei UI", 10)
+        self.device_list.setFont(list_widget_font)
         self.device_list.setStyleSheet(
             """
             QListWidget {
                 border: 2px solid #3e4451;
-                border-radius: 8px;
-                background-color: #282c34;
+                border-radius: 10px;
+                background-color: #1e2127;
                 outline: none;
+                padding: 4px;
             }
             QListWidget::item {
-                padding: 12px;
-                border-bottom: 1px solid #3e4451;
-                color: #abb2bf;
-                border-radius: 4px;
-                margin: 2px;
+                padding: 14px;
+                border-bottom: 1px solid #2c313a;
+                color: #e6e6e6;
+                border-radius: 6px;
+                margin: 3px;
                 background-color: #282c34;
             }
             QListWidget::item:hover {
@@ -579,8 +616,8 @@ class USBDeviceViewerPySide(QMainWindow):
             }
             QListWidget::item:selected {
                 background-color: #3e4451;
-                color: #61afef;
-                font-weight: bold;
+                color: #73bcf7;
+                font-weight: 600;
                 border-left: 5px solid #528bff;
             }
             QListWidget::item:selected:hover {
@@ -602,31 +639,32 @@ class USBDeviceViewerPySide(QMainWindow):
         """创建工具栏"""
         toolbar = QToolBar()
         toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(28, 28))
+        toolbar.setIconSize(QSize(32, 32))
+        toolbar_font = QFont("Microsoft YaHei UI", 11)
+        toolbar_font.setWeight(QFont.Weight.DemiBold)
+        toolbar.setFont(toolbar_font)
         toolbar.setStyleSheet(
             """
             QToolBar {
-                background-color: #21252b;
-                border-bottom: 3px solid #181a1f;
-                padding: 5px;
-                spacing: 10px;
+                background-color: #282c34;
+                border-bottom: 3px solid #1e2127;
+                padding: 8px;
+                spacing: 12px;
             }
             QToolButton {
-                background-color: #282c34;
-                border: 2px solid #3e4451;
-                border-radius: 6px;
-                padding: 8px 15px;
-                font-weight: bold;
+                background-color: #3e4451;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 18px;
                 color: #61afef;
-                margin: 2px;
+                margin: 3px;
             }
             QToolButton:hover {
-                background-color: #2c313a;
-                border: 2px solid #528bff;
-                color: #61afef;
+                background-color: #4b5263;
+                color: #73bcf7;
             }
             QToolButton:pressed {
-                background-color: #3e4451;
+                background-color: #2c313a;
                 color: #61afef;
             }
         """
@@ -659,58 +697,54 @@ class USBDeviceViewerPySide(QMainWindow):
 
         # 监控开关
         monitor_label = QLabel("🔍 自动监控: ")
+        monitor_label_font = QFont("Microsoft YaHei UI", 11)
+        monitor_label_font.setWeight(QFont.Weight.Bold)
+        monitor_label.setFont(monitor_label_font)
         monitor_label.setStyleSheet(
             """
             QLabel {
-                font-weight: bold;
                 color: #abb2bf;
-                padding: 5px;
+                padding: 6px;
             }
         """
         )
         toolbar.addWidget(monitor_label)
 
-        self.monitor_button = QPushButton("● 启动")
-        self.monitor_button.setCheckable(True)
-        self.monitor_button.setChecked(True)
-        self.monitor_button.setMinimumSize(100, 35)
+        self.monitor_button = QPushButton("● 运行中")
+        self.monitor_button.setCheckable(False)
+        self.monitor_button.setEnabled(False)
+        self.monitor_button.setMinimumSize(110, 38)
+        monitor_btn_font = QFont("Microsoft YaHei UI", 11)
+        monitor_btn_font.setWeight(QFont.Weight.Bold)
+        self.monitor_button.setFont(monitor_btn_font)
         self.monitor_button.setStyleSheet(
             """
             QPushButton {
                 background-color: #98c379;
-                color: #282c34;
-                border: 2px solid #7cb668;
-                border-radius: 6px;
-                padding: 8px 15px;
-                font-weight: bold;
-                font-size: 12px;
+                color: #1e2127;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 18px;
             }
-            QPushButton:hover {
-                background-color: #a9d48a;
-            }
-            QPushButton:checked {
-                background-color: #e06c75;
-                border: 2px solid #be5046;
-                color: #282c34;
-            }
-            QPushButton:checked:hover {
-                background-color: #e88388;
+            QPushButton:disabled {
+                background-color: #98c379;
+                color: #1e2127;
             }
         """
         )
-        self.monitor_button.clicked.connect(self.toggle_monitoring)
         toolbar.addWidget(self.monitor_button)
 
         # 系统信息
         sys_label = QLabel(f"  💻 {platform.system()} {platform.release()}  ")
+        sys_font = QFont("Microsoft YaHei UI", 10)
+        sys_label.setFont(sys_font)
         sys_label.setStyleSheet(
             """
             QLabel {
                 color: #5c6370;
-                font-size: 11px;
-                padding: 5px 10px;
-                background-color: #282c34;
-                border-radius: 5px;
+                padding: 6px 12px;
+                background-color: #1e2127;
+                border-radius: 6px;
             }
         """
         )
@@ -719,12 +753,14 @@ class USBDeviceViewerPySide(QMainWindow):
     def create_statusbar(self):
         """创建状态栏"""
         self.statusbar = QStatusBar()
+        statusbar_font = QFont("Microsoft YaHei UI", 10)
+        self.statusbar.setFont(statusbar_font)
         self.statusbar.setStyleSheet(
             """
             QStatusBar {
-                background-color: #21252b;
-                border-top: 3px solid #181a1f;
-                padding: 5px;
+                background-color: #282c34;
+                border-top: 3px solid #1e2127;
+                padding: 8px;
             }
             QStatusBar::item {
                 border: none;
@@ -734,12 +770,14 @@ class USBDeviceViewerPySide(QMainWindow):
         self.setStatusBar(self.statusbar)
 
         self.status_label = QLabel("✅ 就绪")
+        status_font = QFont("Microsoft YaHei UI", 11)
+        status_font.setWeight(QFont.Weight.DemiBold)
+        self.status_label.setFont(status_font)
         self.status_label.setStyleSheet(
             """
             QLabel {
-                color: #abb2bf;
-                font-weight: bold;
-                padding: 5px 10px;
+                color: #e6e6e6;
+                padding: 6px 12px;
                 background-color: transparent;
             }
         """
@@ -747,20 +785,22 @@ class USBDeviceViewerPySide(QMainWindow):
         self.statusbar.addWidget(self.status_label)
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximumWidth(250)
-        self.progress_bar.setMinimumHeight(20)
+        self.progress_bar.setMaximumWidth(260)
+        self.progress_bar.setMinimumHeight(24)
+        progress_font = QFont("Microsoft YaHei UI", 10)
+        self.progress_bar.setFont(progress_font)
         self.progress_bar.setStyleSheet(
             """
             QProgressBar {
                 border: 2px solid #3e4451;
-                border-radius: 5px;
+                border-radius: 8px;
                 text-align: center;
-                background-color: #282c34;
-                color: #abb2bf;
+                background-color: #1e2127;
+                color: #e6e6e6;
             }
             QProgressBar::chunk {
                 background-color: #61afef;
-                border-radius: 3px;
+                border-radius: 6px;
             }
         """
         )
@@ -769,21 +809,15 @@ class USBDeviceViewerPySide(QMainWindow):
 
     def init_timer(self):
         """初始化定时器,启动监控"""
-        QTimer.singleShot(1000, self.start_monitoring_if_enabled)
-
-    def start_monitoring_if_enabled(self):
-        """如果启用了监控,则启动"""
-        if self.monitor_button.isChecked():
-            self.start_monitoring()
+        QTimer.singleShot(1000, self.start_monitoring)
 
     def show_loading_state(self):
         """显示加载状态"""
         self.device_list.clear()
         item = QListWidgetItem("⏳ 正在扫描设备,请稍候...")
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont()
-        font.setPointSize(14)
-        font.setBold(True)
+        font = QFont("Microsoft YaHei UI", 14)
+        font.setWeight(QFont.Weight.Bold)
         item.setFont(font)
         item.setForeground(QColor("#61afef"))
         self.device_list.addItem(item)
@@ -827,6 +861,36 @@ class USBDeviceViewerPySide(QMainWindow):
         item.setForeground(QColor("#e06c75"))
         self.device_list.addItem(item)
 
+    def is_bluetooth_device(self, device_dict: Dict) -> bool:
+        """判断是否为蓝牙HID设备"""
+        # 检查产品名称中是否包含蓝牙相关关键词
+        product = (device_dict.get("product_string") or "").lower()
+        manufacturer = (device_dict.get("manufacturer_string") or "").lower()
+
+        bluetooth_keywords = ["bluetooth", "bt", "蓝牙", "wireless", "无线"]
+        for keyword in bluetooth_keywords:
+            if keyword in product or keyword in manufacturer:
+                return True
+
+        # 检查常见蓝牙适配器VID
+        # 0x0A12 - CSR (Cambridge Silicon Radio)
+        # 0x8087 - Intel Bluetooth
+        # 0x0CF3 - Qualcomm Atheros
+        # 0x0930 - Toshiba Bluetooth
+        # 0x0489 - Foxconn Bluetooth
+        # 0x04CA - Lite-On Technology Bluetooth
+        bluetooth_vids = [0x0A12, 0x8087, 0x0CF3, 0x0930, 0x0489, 0x04CA]
+        vendor_id = device_dict.get("vendor_id", 0)
+        if vendor_id in bluetooth_vids:
+            return True
+
+        # 检查路径中是否包含蓝牙标识
+        path = str(device_dict.get("path", "")).lower()
+        if "bluetooth" in path or "bth" in path:
+            return True
+
+        return False
+
     def process_hid_device(self, device_dict: Dict) -> Dict[str, Any]:
         """处理单个HID设备信息"""
         device: Dict[str, Any] = {}
@@ -840,6 +904,9 @@ class USBDeviceViewerPySide(QMainWindow):
         device["product"] = device_dict.get("product_string") or "未知"
         device["serial"] = device_dict.get("serial_number") or "N/A"
 
+        # 标识是否为蓝牙设备
+        device["is_bluetooth"] = self.is_bluetooth_device(device_dict)
+
         # 构建详细信息
         raw_info = []
         raw_info.append(f"供应商ID: {device['vid']}")
@@ -847,6 +914,8 @@ class USBDeviceViewerPySide(QMainWindow):
         raw_info.append(f"制造商: {device['vendor']}")
         raw_info.append(f"产品: {device['product']}")
         raw_info.append(f"序列号: {device['serial']}")
+        if device["is_bluetooth"]:
+            raw_info.append(f"连接类型: 🔵 蓝牙HID设备")
         raw_info.append(f"路径: {device_dict.get('path', 'N/A')}")
         raw_info.append(f"接口号: {device_dict.get('interface_number', 'N/A')}")
         raw_info.append(f"使用页: 0x{device_dict.get('usage_page', 0):04X}")
@@ -919,29 +988,50 @@ class USBDeviceViewerPySide(QMainWindow):
 
         return self.scan_hid_devices()
 
-    def update_device_list(self):
-        """更新设备列表显示"""
+    def update_device_list(self, highlight_device_ids=None):
+        """更新设备列表显示
+
+        Args:
+            highlight_device_ids: 需要高亮显示的设备ID列表
+        """
         self.device_list.clear()
 
         if not self.filtered_devices:
             item = QListWidgetItem("🔌 未找到HID设备\n\n请连接HID设备后点击刷新按钮")
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            font = QFont()
-            font.setPointSize(13)
-            font.setBold(True)
+            font = QFont("Microsoft YaHei UI", 13)
+            font.setWeight(QFont.Weight.Bold)
             item.setFont(font)
             item.setForeground(QColor("#5c6370"))
             self.device_list.addItem(item)
         else:
+            first_highlight_item = None
             for idx, device in enumerate(self.filtered_devices, 1):
                 product = device.get("product", "未知设备")
                 vendor = device.get("vendor", "未知厂商")
                 vid = device.get("vid", "?")
                 pid = device.get("pid", "?")
                 serial = device.get("serial", "")
+                device_id = self.get_device_id(device)
+                is_bluetooth = device.get("is_bluetooth", False)
+
+                # 检查是否需要高亮
+                is_highlighted = (
+                    highlight_device_ids and device_id in highlight_device_ids
+                )
+
+                # 为新插入的设备添加高对比度NEW标记
+                new_badge = ""
+                if is_highlighted:
+                    new_badge = "🟢 [NEW]  "
+
+                # 为蓝牙设备添加标识
+                bluetooth_badge = ""
+                if is_bluetooth:
+                    bluetooth_badge = "🔵 [蓝牙]  "
 
                 display_text = (
-                    f"📱 {product}\n"
+                    f"{new_badge}{bluetooth_badge}📱 {product}\n"
                     f"   🏢 {vendor}\n"
                     f"   🆔 VID: {vid}  •  PID: {pid}"
                 )
@@ -950,10 +1040,26 @@ class USBDeviceViewerPySide(QMainWindow):
 
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, device)
-                font = QFont()
-                font.setPointSize(10)
+                font = QFont("Microsoft YaHei UI", 10)
+                if is_highlighted:
+                    font.setWeight(QFont.Weight.Bold)
                 item.setFont(font)
+
+                # 为高亮设备设置高对比度的亮绿色背景和文字
+                if is_highlighted:
+                    item.setBackground(QColor("#0d2818"))
+                    item.setForeground(QColor("#00ff7f"))
+                    if first_highlight_item is None:
+                        first_highlight_item = item
+
                 self.device_list.addItem(item)
+
+            # 选中并滚动到第一个高亮的设备
+            if first_highlight_item:
+                self.device_list.setCurrentItem(first_highlight_item)
+                self.device_list.scrollToItem(
+                    first_highlight_item, QListWidget.ScrollHint.PositionAtCenter
+                )
 
         self.device_count_label.setText(f"📊 设备数: {len(self.filtered_devices)}")
 
@@ -994,10 +1100,10 @@ class USBDeviceViewerPySide(QMainWindow):
                 details = device.get("raw_info", "")
                 if not details:
                     details = f"""VID: {device.get('vid', '未知')}
-PID: {device.get('pid', '未知')}
-供应商: {device.get('vendor', '未知')}
-产品名称: {device.get('product', '未知')}
-序列号: {device.get('serial', 'N/A')}"""
+                    PID: {device.get('pid', '未知')}
+                    供应商: {device.get('vendor', '未知')}
+                    产品名称: {device.get('product', '未知')}
+                    序列号: {device.get('serial', 'N/A')}"""
                 QApplication.clipboard().setText(details)
                 self.status_label.setText("✅ 已复制到剪贴板")
                 MessageBox.show_message("已复制到剪贴板", "success", self)
@@ -1059,18 +1165,8 @@ PID: {device.get('pid', '未知')}
             self.monitor_thread.stop()
             self.monitor_thread.wait()
             self.monitor_thread = None
-            self.status_label.setText("⏸️ 已停止自动监控")
 
-    def toggle_monitoring(self):
-        """切换监控状态"""
-        if self.monitor_button.isChecked():
-            self.monitor_button.setText("● 停止")
-            self.start_monitoring()
-        else:
-            self.monitor_button.setText("● 启动")
-            self.stop_monitoring()
-
-    def on_device_changed(self, added_count, removed_count):
+    def on_device_changed(self, added_count, removed_count, added_device_ids):
         """设备变化回调"""
         # 更新过滤后的设备列表
         if self.search_field.text():
@@ -1078,7 +1174,10 @@ PID: {device.get('pid', '未知')}
         else:
             self.filtered_devices = self.devices.copy()
 
-        self.update_device_list()
+        # 传递新增设备ID以高亮显示
+        self.update_device_list(
+            highlight_device_ids=added_device_ids if added_count > 0 else None
+        )
 
         # 显示通知
         if added_count > 0 and removed_count > 0:
