@@ -77,16 +77,34 @@ def check_command(cmd):
 def install_package(package):
     """安装 Python 包"""
     print_info(f"正在安装 {package}...")
+
+    # 尝试使用 uv pip（优先）
+    if check_command("uv"):
+        try:
+            subprocess.run(
+                ["uv", "pip", "install", package],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print_success(f"{package} 安装成功")
+            return True
+        except subprocess.CalledProcessError as e:
+            print_error(f"{package} 安装失败: {e.stderr if e.stderr else e}")
+            return False
+
+    # 回退到 pip
     try:
         subprocess.run(
             [sys.executable, "-m", "pip", "install", package],
             check=True,
             capture_output=True,
+            text=True,
         )
         print_success(f"{package} 安装成功")
         return True
     except subprocess.CalledProcessError as e:
-        print_error(f"{package} 安装失败: {e}")
+        print_error(f"{package} 安装失败: {e.stderr if e.stderr else e}")
         return False
 
 

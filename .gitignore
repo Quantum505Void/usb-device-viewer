@@ -15,4 +15,4 @@ Data/
 logs/
 *.log
 
-*.lock
+uv.lock

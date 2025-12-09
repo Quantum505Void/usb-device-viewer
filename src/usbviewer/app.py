@@ -1,4 +1,4 @@
-"""Briefcase 应用入口点"""
+"""应用入口点"""
 
 import sys
 

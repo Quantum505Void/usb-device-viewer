@@ -391,7 +391,10 @@ class DeviceDetailsDialog(QDialog):
         self.setLayout(layout)
 
     def copy_info(self):
-        details = f"""VID: {self.device.get('vid', '未知')}
+        # 复制完整的原始数据
+        details = self.device.get("raw_info", "")
+        if not details:
+            details = f"""VID: {self.device.get('vid', '未知')}
 PID: {self.device.get('pid', '未知')}
 供应商: {self.device.get('vendor', '未知')}
 产品名称: {self.device.get('product', '未知')}
@@ -427,29 +430,13 @@ class USBDeviceViewerPySide(QMainWindow):
         QTimer.singleShot(500, self.refresh_devices)
 
     def set_window_icon(self):
-        """设置窗口图标（支持 Briefcase 打包）"""
-        import os
+        """设置窗口图标"""
         from pathlib import Path
 
         # 尝试多个可能的图标路径
         icon_paths = []
 
-        # 1. Briefcase 资源路径（优先）
-        try:
-            from importlib.resources import files
-
-            resource_path = files("usbviewer")
-            icon_paths.extend(
-                [
-                    resource_path / "icon.svg",
-                    resource_path / "icon.png",
-                    resource_path / "icon.ico",
-                ]
-            )
-        except (ImportError, TypeError):
-            pass
-
-        # 2. 打包后的路径
+        # 打包后的路径
         if getattr(sys, "frozen", False):
             base_path = Path(sys.argv[0]).parent
         else:
@@ -1003,7 +990,10 @@ class USBDeviceViewerPySide(QMainWindow):
         if current_item:
             device = current_item.data(Qt.ItemDataRole.UserRole)
             if device:
-                details = f"""VID: {device.get('vid', '未知')}
+                # 复制完整的原始数据
+                details = device.get("raw_info", "")
+                if not details:
+                    details = f"""VID: {device.get('vid', '未知')}
 PID: {device.get('pid', '未知')}
 供应商: {device.get('vendor', '未知')}
 产品名称: {device.get('product', '未知')}
@@ -1028,11 +1018,16 @@ PID: {device.get('pid', '未知')}
 
                 for idx, device in enumerate(self.devices, 1):
                     f.write(f"设备 #{idx}\n")
-                    f.write(f"VID: {device.get('vid', '未知')}\n")
-                    f.write(f"PID: {device.get('pid', '未知')}\n")
-                    f.write(f"供应商: {device.get('vendor', '未知')}\n")
-                    f.write(f"产品: {device.get('product', '未知')}\n")
-                    f.write(f"序列号: {device.get('serial', 'N/A')}\n")
+                    # 导出完整的原始数据
+                    raw_info = device.get("raw_info", "")
+                    if raw_info:
+                        f.write(f"{raw_info}\n")
+                    else:
+                        f.write(f"VID: {device.get('vid', '未知')}\n")
+                        f.write(f"PID: {device.get('pid', '未知')}\n")
+                        f.write(f"供应商: {device.get('vendor', '未知')}\n")
+                        f.write(f"产品: {device.get('product', '未知')}\n")
+                        f.write(f"序列号: {device.get('serial', 'N/A')}\n")
                     f.write(f"{'-' * 80}\n\n")
 
             self.status_label.setText(f"✅ 已导出到 {filename}")
