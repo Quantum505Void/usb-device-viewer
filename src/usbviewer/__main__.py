@@ -247,7 +247,9 @@ class DeviceDetailsDialog(QDialog):
         if self.device.get("is_bluetooth", False):
             bluetooth_prefix = "🔵 [蓝牙HID]  "
 
-        title_label = QLabel(f"{bluetooth_prefix}📱 {self.device.get('product', '未知设备')}")
+        title_label = QLabel(
+            f"{bluetooth_prefix}📱 {self.device.get('product', '未知设备')}"
+        )
         title_font = QFont("Microsoft YaHei UI", 16)
         title_font.setWeight(QFont.Weight.Bold)
         title_label.setFont(title_font)
@@ -862,65 +864,135 @@ class USBDeviceViewerPySide(QMainWindow):
         self.device_list.addItem(item)
 
     def is_bluetooth_device(self, device_dict: Dict) -> bool:
-        """判断是否为蓝牙HID设备"""
-        # 检查产品名称中是否包含蓝牙相关关键词
-        product = (device_dict.get("product_string") or "").lower()
-        manufacturer = (device_dict.get("manufacturer_string") or "").lower()
+        """判断是否为蓝牙HID设备
 
-        bluetooth_keywords = ["bluetooth", "bt", "蓝牙", "wireless", "无线"]
-        for keyword in bluetooth_keywords:
-            if keyword in product or keyword in manufacturer:
-                return True
+        基于 hidapi 官方标准 (https://github.com/libusb/hidapi)
+        优先级顺序:
+        1. bus_type 字段 (hidapi 0.13.0+) - 最可靠
+        2. 设备路径检查 - 跨平台通用
+        3. interface_number == -1 结合其他特征 - 辅助判断
+        """
 
-        # 检查常见蓝牙适配器VID
-        # 0x0A12 - CSR (Cambridge Silicon Radio)
-        # 0x8087 - Intel Bluetooth
-        # 0x0CF3 - Qualcomm Atheros
-        # 0x0930 - Toshiba Bluetooth
-        # 0x0489 - Foxconn Bluetooth
-        # 0x04CA - Lite-On Technology Bluetooth
-        bluetooth_vids = [0x0A12, 0x8087, 0x0CF3, 0x0930, 0x0489, 0x04CA]
-        vendor_id = device_dict.get("vendor_id", 0)
-        if vendor_id in bluetooth_vids:
+        # 方法1: 检查 bus_type (hidapi 0.13.0+ 标准字段)
+        # HID_API_BUS_BLUETOOTH = 0x02
+        bus_type = device_dict.get("bus_type", None)
+        if bus_type == 2:
             return True
 
-        # 检查路径中是否包含蓝牙标识
-        path = str(device_dict.get("path", "")).lower()
-        if "bluetooth" in path or "bth" in path:
+        # 方法2: 检查设备路径中的蓝牙标识 (所有平台通用)
+        # Linux: /dev/hidrawX 通过 /sys/class/bluetooth
+        # Windows: \\?\hid#...#bluetooth#... 或包含 BTHENUM
+        # macOS: IOService: 路径包含 Bluetooth
+        path = device_dict.get("path", b"")
+        if isinstance(path, bytes):
+            path_str = path.decode("utf-8", errors="ignore").lower()
+        else:
+            path_str = str(path).lower()
+
+        if "bluetooth" in path_str or "bth" in path_str:
             return True
+
+        # 方法3: interface_number == -1 通常表示非USB接口
+        # 蓝牙HID设备不使用标准USB接口编号
+        interface_number = device_dict.get("interface_number", None)
+        if interface_number == -1:
+            # 进一步验证: 检查 usage_page 是否为常见HID类型
+            usage_page = device_dict.get("usage_page", 0)
+            # 0x01: Generic Desktop Controls (鼠标、键盘等)
+            # 0x0C: Consumer Devices (多媒体控制等)
+            if usage_page in [0x01, 0x0C]:
+                # 排除产品名中明确标注的有线USB设备
+                product = (device_dict.get("product_string") or "").lower()
+                manufacturer = (device_dict.get("manufacturer_string") or "").lower()
+
+                # USB关键词检查
+                usb_keywords = ["usb", "wired", "有线"]
+                has_usb_keyword = any(
+                    kw in product or kw in manufacturer for kw in usb_keywords
+                )
+
+                if not has_usb_keyword:
+                    return True
 
         return False
 
     def process_hid_device(self, device_dict: Dict) -> Dict[str, Any]:
-        """处理单个HID设备信息"""
+        """处理单个HID设备信息
+
+        基于 hidapi 标准字段 (https://github.com/libusb/hidapi)
+        参考: hidapi/hidapi.h 中的 hid_device_info 结构体
+        """
         device: Dict[str, Any] = {}
 
-        # 基本信息
+        # 基本识别信息
         device["vid"] = f"{device_dict.get('vendor_id', 0):04X}"
         device["pid"] = f"{device_dict.get('product_id', 0):04X}"
 
-        # HID库直接提供字符串信息，无需复杂处理
+        # 字符串描述符
         device["vendor"] = device_dict.get("manufacturer_string") or "未知"
         device["product"] = device_dict.get("product_string") or "未知"
         device["serial"] = device_dict.get("serial_number") or "N/A"
 
-        # 标识是否为蓝牙设备
+        # 蓝牙设备识别 (基于hidapi标准)
         device["is_bluetooth"] = self.is_bluetooth_device(device_dict)
 
-        # 构建详细信息
+        # 构建详细信息输出
         raw_info = []
-        raw_info.append(f"供应商ID: {device['vid']}")
-        raw_info.append(f"产品ID: {device['pid']}")
+        raw_info.append(f"供应商ID (VID): {device['vid']}")
+        raw_info.append(f"产品ID (PID): {device['pid']}")
         raw_info.append(f"制造商: {device['vendor']}")
-        raw_info.append(f"产品: {device['product']}")
+        raw_info.append(f"产品名称: {device['product']}")
         raw_info.append(f"序列号: {device['serial']}")
+
+        # 总线类型 (hidapi 0.13.0+标准字段)
+        bus_type = device_dict.get("bus_type", None)
+        if bus_type is not None:
+            # hidapi 标准定义的总线类型
+            # HID_API_BUS_UNKNOWN = 0x00
+            # HID_API_BUS_USB = 0x01
+            # HID_API_BUS_BLUETOOTH = 0x02
+            # HID_API_BUS_I2C = 0x03
+            # HID_API_BUS_SPI = 0x04
+            # HID_API_BUS_VIRTUAL = 0x05 (hidapi 0.16.0+)
+            bus_type_names = {
+                0: "Unknown",
+                1: "USB",
+                2: "Bluetooth",
+                3: "I2C",
+                4: "SPI",
+                5: "Virtual",
+            }
+            bus_name = bus_type_names.get(bus_type, f"Unknown(0x{bus_type:02X})")
+            raw_info.append(f"总线类型: {bus_name}")
+
+        # 连接类型标识 (用户友好显示)
         if device["is_bluetooth"]:
-            raw_info.append(f"连接类型: 🔵 蓝牙HID设备")
-        raw_info.append(f"路径: {device_dict.get('path', 'N/A')}")
-        raw_info.append(f"接口号: {device_dict.get('interface_number', 'N/A')}")
-        raw_info.append(f"使用页: 0x{device_dict.get('usage_page', 0):04X}")
-        raw_info.append(f"使用ID: 0x{device_dict.get('usage', 0):04X}")
-        raw_info.append(f"发行版本: {device_dict.get('release_number', 0)}")
+            raw_info.append(f"连接方式: 🔵 蓝牙HID设备")
+        else:
+            raw_info.append(f"连接方式: 🔌 USB有线连接")
+
+        # 设备路径 (平台特定)
+        path = device_dict.get("path", "N/A")
+        if isinstance(path, bytes):
+            path = path.decode("utf-8", errors="ignore")
+        raw_info.append(f"设备路径: {path}")
+
+        # USB接口号 (对USB设备有效,其他为-1)
+        interface_number = device_dict.get("interface_number", -1)
+        if interface_number >= 0:
+            raw_info.append(f"USB接口号: {interface_number}")
+        else:
+            raw_info.append(f"USB接口号: N/A (非USB或单接口)")
+
+        # HID使用信息
+        usage_page = device_dict.get("usage_page", 0)
+        usage = device_dict.get("usage", 0)
+        raw_info.append(f"HID使用页 (Usage Page): 0x{usage_page:04X}")
+        raw_info.append(f"HID使用ID (Usage): 0x{usage:04X}")
+
+        # 设备版本号
+        release_number = device_dict.get("release_number", 0)
+        raw_info.append(f"设备版本 (Release): 0x{release_number:04X}")
 
         device["raw_info"] = "\n".join(raw_info)
         return device
