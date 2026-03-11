@@ -184,15 +184,16 @@ function createWindow() {
   win = new BrowserWindow({
     title: "USB 设备查看器",
     url: "views://mainview/index.html",
+    titleBarStyle: "hidden",   // 隐藏原生标题栏和关闭按钮，UI 自绘
     frame: { width: 1280, height: 860, minWidth: 1000, minHeight: 600 },
     rpc,
   });
 
-  // close 事件在窗口已销毁后触发（无法拦截）
-  // exitOnLastWindowClosed: false 保证进程不退出
-  // 重建窗口以备下次托盘"显示"
+  // close 事件：titleBarStyle:hidden 后只有 Alt+F4 / 系统级关闭才触发
+  // 此时用 minimize 替代（窗口未销毁时有效）
   win.on("close", () => {
     if (isQuitting) return;
+    // 窗口已销毁，标记为不可见；下次托盘"显示"时重建
     win = null;
     setTimeout(() => {
       if (!isQuitting) createWindow();
