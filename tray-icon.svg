@@ -1,12 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
-  <!-- USB symbol in indigo -->
-  <rect x="9" y="2" width="4" height="14" rx="1" fill="#6366f1"/>
-  <rect x="5" y="2" width="12" height="3" rx="1" fill="#6366f1"/>
-  <rect x="5" y="7" width="4" height="2" rx="0.5" fill="#818cf8"/>
-  <rect x="5" y="7" width="1.5" height="3" rx="0.5" fill="#818cf8"/>
-  <rect x="13" y="9" width="4" height="2" rx="0.5" fill="#818cf8"/>
-  <rect x="15.5" y="7" width="1.5" height="4" rx="0.5" fill="#818cf8"/>
-  <!-- connector -->
-  <rect x="7" y="16" width="8" height="4" rx="1" fill="#6366f1"/>
-  <rect x="9" y="17" width="4" height="2" rx="0.5" fill="white"/>
+  <!-- USB plug body -->
+  <rect x="8" y="13" width="6" height="7" rx="1.5" fill="#6366f1"/>
+  <rect x="9.5" y="14.5" width="3" height="1.5" rx="0.5" fill="#c7d2fe"/>
+  <rect x="9.5" y="17" width="3" height="1.5" rx="0.5" fill="#c7d2fe"/>
+  <!-- USB trident stem -->
+  <rect x="10" y="6" width="2" height="7" rx="1" fill="#818cf8"/>
+  <!-- USB trident top bar -->
+  <rect x="5" y="5" width="12" height="2" rx="1" fill="#6366f1"/>
+  <!-- Left prong -->
+  <rect x="5" y="3" width="2" height="4" rx="1" fill="#818cf8"/>
+  <circle cx="6" cy="3.5" r="1.2" fill="#a5b4fc"/>
+  <!-- Right prong -->
+  <rect x="15" y="3" width="2" height="4" rx="1" fill="#818cf8"/>
+  <circle cx="16" cy="3.5" r="1.2" fill="#a5b4fc"/>
+  <!-- Center circle -->
+  <circle cx="11" cy="6" r="1.5" fill="#4f46e5"/>
+  <circle cx="11" cy="6" r="0.7" fill="#e0e7ff"/>
 </svg>
