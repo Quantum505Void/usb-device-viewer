@@ -1,7 +1,43 @@
 import { BrowserWindow, BrowserView, utils } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
+import { existsSync, writeFileSync, rmSync } from "fs";
+
+// ──────────────────────────────────────────────
+// 单实例互斥锁（跨平台）
+// ──────────────────────────────────────────────
+const LOCK_FILE = join(tmpdir(), "usb-device-viewer.lock");
+
+function acquireLock(): boolean {
+  if (existsSync(LOCK_FILE)) {
+    // 检查进程是否还存活
+    try {
+      const pid = parseInt(Bun.file(LOCK_FILE).toString(), 10);
+      if (!isNaN(pid) && pid !== process.pid) {
+        // 尝试发信号（Unix）或 tasklist（Windows）
+        try {
+          process.kill(pid, 0); // 0 = 只检测是否存活
+          console.warn(`已有实例运行 (PID ${pid})，本次启动退出`);
+          return false;
+        } catch {
+          // 进程不存在，锁文件是残留的
+        }
+      }
+    } catch { /* 读文件失败，忽略 */ }
+  }
+  writeFileSync(LOCK_FILE, String(process.pid));
+  return true;
+}
+
+function releaseLock() {
+  try { rmSync(LOCK_FILE); } catch { /* 忽略 */ }
+}
+
+if (!acquireLock()) process.exit(0);
+process.on("exit", releaseLock);
+process.on("SIGINT",  () => { releaseLock(); process.exit(0); });
+process.on("SIGTERM", () => { releaseLock(); process.exit(0); });
 
 // ──────────────────────────────────────────────
 // HID 扫描逻辑
@@ -20,53 +56,59 @@ async function loadHID() {
   return hidModule;
 }
 
-function isBluetoothDevice(dev: Record<string, unknown>): boolean {
-  // bus_type == 2 表示蓝牙 (hidapi 0.13.0+)
-  if (dev.busType === 2) return true;
+// USB vendor name 快速查表（常见厂商）
+const VENDOR_NAMES: Record<number, string> = {
+  0x046d: "Logitech",  0x045e: "Microsoft",  0x05ac: "Apple",
+  0x04d9: "Holtek",    0x0483: "STMicro",     0x1532: "Razer",
+  0x1b1c: "Corsair",   0x046a: "Cherry",      0x17ef: "Lenovo",
+  0x0b05: "ASUS",      0x03f0: "HP",          0x04ca: "Lite-On",
+  0x258a: "SinoWealth",0x24ae: "Shenzhen", 0x0c45: "Microdia",
+  0x1a2c: "China Resource", 0x0e8f: "GreenAsia",
+};
 
+function isBluetoothDevice(dev: Record<string, unknown>): boolean {
+  if (dev.busType === 2) return true;
   const path = typeof dev.path === "string" ? dev.path.toLowerCase() : "";
   if (path.includes("bluetooth") || path.includes("bth")) return true;
-
-  // interface_number == -1 通常表示非USB接口
   if (dev.interface === -1) {
     const usagePage = (dev.usagePage as number) ?? 0;
     if (usagePage === 0x01 || usagePage === 0x0c) {
       const product = ((dev.product as string) ?? "").toLowerCase();
       const mfr = ((dev.manufacturer as string) ?? "").toLowerCase();
       const usbKW = ["usb", "wired", "有线"];
-      if (!usbKW.some((k) => product.includes(k) || mfr.includes(k))) {
-        return true;
-      }
+      if (!usbKW.some((k) => product.includes(k) || mfr.includes(k))) return true;
     }
   }
   return false;
 }
 
+function resolveVendor(dev: Record<string, unknown>): string {
+  const mfr = (dev.manufacturer as string)?.trim();
+  if (mfr && mfr !== "Unknown" && mfr !== "") return mfr;
+  const vid = dev.vendorId as number;
+  return VENDOR_NAMES[vid] ?? "未知厂商";
+}
+
 function buildRawInfo(dev: Record<string, unknown>): string {
   const busNames: Record<number, string> = {
-    0: "Unknown",
-    1: "USB",
-    2: "Bluetooth",
-    3: "I2C",
-    4: "SPI",
-    5: "Virtual",
+    0: "Unknown", 1: "USB", 2: "Bluetooth", 3: "I2C", 4: "SPI", 5: "Virtual",
   };
   const busType = dev.busType as number | undefined;
   const isBT = isBluetoothDevice(dev);
   const lines = [
-    `供应商ID (VID): ${String(dev.vendorId ?? 0).padStart(4, "0").toUpperCase()}`,
-    `产品ID (PID): ${String(dev.productId ?? 0).padStart(4, "0").toUpperCase()}`,
-    `制造商: ${dev.manufacturer ?? "未知"}`,
+    `供应商ID (VID): ${String(dev.vendorId ?? 0).toString(16).padStart(4, "0").toUpperCase()}`,
+    `产品ID (PID): ${String(dev.productId ?? 0).toString(16).padStart(4, "0").toUpperCase()}`,
+    `制造商: ${resolveVendor(dev)}`,
     `产品名称: ${dev.product ?? "未知"}`,
     `序列号: ${dev.serialNumber ?? "N/A"}`,
     busType !== undefined
       ? `总线类型: ${busNames[busType] ?? `Unknown(0x${busType.toString(16).padStart(2, "0")})`}`
       : null,
-    `连接方式: ${isBT ? "🔵 蓝牙HID设备" : "🔌 USB有线连接"}`,
+    `连接方式: ${isBT ? "蓝牙HID设备" : "USB有线连接"}`,
     `设备路径: ${dev.path ?? "N/A"}`,
     (dev.interface as number) >= 0
       ? `USB接口号: ${dev.interface}`
-      : `USB接口号: N/A (非USB或单接口)`,
+      : `USB接口号: N/A`,
     `HID使用页 (Usage Page): 0x${((dev.usagePage as number) ?? 0).toString(16).padStart(4, "0").toUpperCase()}`,
     `HID使用ID (Usage): 0x${((dev.usage as number) ?? 0).toString(16).padStart(4, "0").toUpperCase()}`,
     `设备版本 (Release): 0x${((dev.release as number) ?? 0).toString(16).padStart(4, "0").toUpperCase()}`,
@@ -85,31 +127,34 @@ async function scanDevices(): Promise<HIDDevice[]> {
   const result: HIDDevice[] = [];
 
   for (const dev of raw) {
-    const vid = ((dev.vendorId as number) ?? 0)
-      .toString(16)
-      .padStart(4, "0")
-      .toUpperCase();
-    const pid = ((dev.productId as number) ?? 0)
-      .toString(16)
-      .padStart(4, "0")
-      .toUpperCase();
+    const vid = ((dev.vendorId as number) ?? 0).toString(16).padStart(4, "0").toUpperCase();
+    const pid = ((dev.productId as number) ?? 0).toString(16).padStart(4, "0").toUpperCase();
     if (vid === "0000" && pid === "0000") continue;
 
-    const serial = (dev.serialNumber as string) ?? "N/A";
-    const key = `${vid}:${pid}:${serial}`;
+    const serial = (dev.serialNumber as string)?.trim() || "N/A";
+    const path = (dev.path as string) ?? "";
+    const iface = (dev.interface as number) ?? -1;
+    const key = `${vid}:${pid}:${serial}:${path}:${iface}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
     result.push({
       vid,
       pid,
-      vendor: (dev.manufacturer as string) || "未知",
-      product: (dev.product as string) || "未知",
+      vendor: resolveVendor(dev),
+      product: ((dev.product as string)?.trim()) || `HID ${vid}:${pid}`,
       serial,
       isBluetooth: isBluetoothDevice(dev),
       rawInfo: buildRawInfo(dev),
     });
   }
+
+  // 排序：先 USB 后蓝牙，同类按 VID+PID 排
+  result.sort((a, b) => {
+    if (a.isBluetooth !== b.isBluetooth) return a.isBluetooth ? 1 : -1;
+    return `${a.vid}${a.pid}`.localeCompare(`${b.vid}${b.pid}`);
+  });
+
   return result;
 }
 
@@ -131,10 +176,8 @@ function startMonitor() {
     try {
       const devices = await scanDevices();
       const currentIds = new Set(devices.map(getDeviceId));
-
       const added = [...currentIds].filter((id) => !lastDeviceIds.has(id));
       const removed = [...lastDeviceIds].filter((id) => !currentIds.has(id));
-
       if (added.length > 0 || removed.length > 0) {
         lastDeviceIds = currentIds;
         win?.webview.rpc.send.devicesUpdated({
@@ -163,56 +206,37 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
         return devices;
       },
       exportDevices: async ({ devices }) => {
-        const { format } = await import("date-fns").catch(() => ({
-          format: null,
-        }));
         const now = new Date();
-        const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
         const filename = `usb_devices_${ts}.txt`;
         const outPath = join(homedir(), "Documents", filename);
 
-        const { platform } = process;
-        let header = `USB 设备列表\n导出时间: ${now.toLocaleString("zh-CN")}\n系统: ${platform}\n${"=".repeat(80)}\n\n`;
+        const header =
+          `USB 设备列表\n导出时间: ${now.toLocaleString("zh-CN")}\n系统: ${process.platform}\n` +
+          `设备总数: ${devices.length}\n${"=".repeat(80)}\n\n`;
         const body = devices
-          .map(
-            (d, i) =>
-              `设备 #${i + 1}\n${d.rawInfo}\n${"-".repeat(80)}\n`,
-          )
+          .map((d, i) => `设备 #${i + 1}\n${d.rawInfo}\n${"-".repeat(80)}\n`)
           .join("\n");
 
         await Bun.write(outPath, header + body);
         return { success: true, path: outPath };
       },
       copyToClipboard: async ({ text }) => {
-        // 使用 pbcopy / xclip / clip 跨平台复制
-        const { platform } = process;
         try {
-          if (platform === "darwin") {
-            const proc = Bun.spawn(["pbcopy"], { stdin: "pipe" });
-            proc.stdin.write(text);
-            proc.stdin.end();
-            await proc.exited;
-          } else if (platform === "win32") {
-            const proc = Bun.spawn(["clip"], { stdin: "pipe" });
-            proc.stdin.write(text);
-            proc.stdin.end();
-            await proc.exited;
+          if (process.platform === "darwin") {
+            const p = Bun.spawn(["pbcopy"], { stdin: "pipe" });
+            p.stdin.write(text); p.stdin.end(); await p.exited;
+          } else if (process.platform === "win32") {
+            const p = Bun.spawn(["clip"], { stdin: "pipe" });
+            p.stdin.write(text); p.stdin.end(); await p.exited;
           } else {
-            // Linux: try xclip then xsel
             try {
-              const proc = Bun.spawn(["xclip", "-selection", "clipboard"], {
-                stdin: "pipe",
-              });
-              proc.stdin.write(text);
-              proc.stdin.end();
-              await proc.exited;
+              const p = Bun.spawn(["xclip", "-selection", "clipboard"], { stdin: "pipe" });
+              p.stdin.write(text); p.stdin.end(); await p.exited;
             } catch {
-              const proc = Bun.spawn(["xsel", "--clipboard", "--input"], {
-                stdin: "pipe",
-              });
-              proc.stdin.write(text);
-              proc.stdin.end();
-              await proc.exited;
+              const p = Bun.spawn(["xsel", "--clipboard", "--input"], { stdin: "pipe" });
+              p.stdin.write(text); p.stdin.end(); await p.exited;
             }
           }
           return { success: true };
@@ -236,16 +260,15 @@ win = new BrowserWindow({
   frame: {
     width: 1280,
     height: 860,
+    minWidth: 1000,
+    minHeight: 600,
   },
   rpc,
 });
 
 win.on("close", () => {
-  if (monitorInterval) {
-    clearInterval(monitorInterval);
-    monitorInterval = null;
-  }
+  if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
+  releaseLock();
 });
 
-// 窗口就绪后启动监控
-setTimeout(startMonitor, 2000);
+setTimeout(startMonitor, 1500);

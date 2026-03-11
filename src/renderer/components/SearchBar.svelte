@@ -5,6 +5,16 @@
     total: number;
   };
   let { query = $bindable(), count, total }: Props = $props();
+
+  // debounce：输入停顿 120ms 后才触发过滤
+  let inputVal = $state(query);
+  let debounceTimer: ReturnType<typeof setTimeout>;
+  function handleInput(e: Event) {
+    inputVal = (e.target as HTMLInputElement).value;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { query = inputVal; }, 120);
+  }
+  function clearQuery() { inputVal = ""; query = ""; }
 </script>
 
 <div class="searchbar">
@@ -12,15 +22,16 @@
     <span class="search-icon">⌕</span>
     <input
       type="text"
-      bind:value={query}
+      value={inputVal}
+      oninput={handleInput}
       placeholder="搜索设备... VID · PID · 厂商 · 产品 · 序列号"
       class="search-input"
     />
-    {#if query}
-      <button class="clear-btn" onclick={() => (query = "")}>✕</button>
+    {#if inputVal}
+      <button class="clear-btn" onclick={clearQuery}>✕</button>
     {/if}
   </div>
-  {#if query}
+  {#if inputVal}
     <div class="filter-hint">
       {count} / {total} 个匹配
     </div>
