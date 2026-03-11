@@ -7,7 +7,7 @@
   "scripts": {
     "vite:build": "vite build",
     "start": "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH bun run vite:build && LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH bun run ./node_modules/.bin/electrobun dev",
-    "build": "bun run vite:build && bun run ./node_modules/.bin/electrobun build",
+    "build": "bun run vite:build && LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH bun run ./node_modules/.bin/electrobun build",
     "dev": "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH bun run vite:build && LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH bun run ./node_modules/.bin/electrobun dev"
   },
   "dependencies": {
