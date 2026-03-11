@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserView, utils } from "electrobun/bun";
+import { BrowserWindow, BrowserView, utils, Tray } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
 import { homedir, tmpdir } from "os";
@@ -266,9 +266,68 @@ win = new BrowserWindow({
   rpc,
 });
 
-win.on("close", () => {
+// ──────────────────────────────────────────────
+// 系统托盘
+// ──────────────────────────────────────────────
+
+let tray: Tray | null = null;
+let windowVisible = true;
+
+function showWindow() {
+  win?.show();
+  windowVisible = true;
+}
+
+function hideWindow() {
+  win?.minimize();
+  windowVisible = false;
+}
+
+function quitApp() {
   if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
+  tray?.remove();
   releaseLock();
+  process.exit(0);
+}
+
+try {
+  tray = new Tray({
+    image: join(import.meta.dir, "../../tray-icon.png"),
+    width: 16,
+    height: 16,
+  });
+
+  tray.setMenu([
+    { label: "USB 设备查看器 v3.0", enabled: false },
+    { type: "separator" },
+    { label: "显示窗口", action: "show" },
+    { label: "隐藏窗口", action: "hide" },
+    { type: "separator" },
+    { label: "退出", action: "quit" },
+  ]);
+
+  tray.on("tray-clicked", (event: any) => {
+    const action = event?.action ?? "";
+    if (action === "quit") {
+      quitApp();
+    } else if (action === "show") {
+      showWindow();
+    } else if (action === "hide") {
+      hideWindow();
+    } else {
+      // 单击图标本身：切换显示
+      if (windowVisible) hideWindow();
+      else showWindow();
+    }
+  });
+} catch (e) {
+  console.warn("托盘初始化失败:", e);
+}
+
+// 关闭按钮 → 最小化到托盘（不退出）
+win.on("close", () => {
+  windowVisible = false;
+  // 不调用 releaseLock/process.exit，保持后台运行
 });
 
 setTimeout(startMonitor, 1500);
