@@ -13,7 +13,8 @@ export default {
     },
     copy: {
       "src/renderer-dist": "views/mainview",
-      "tray-icon.png": "tray-icon.png",
+      "tray-icon.svg": "views/mainview/tray-icon.svg",
+      "tray-icon.png": "views/mainview/tray-icon.png",
     },
   },
   runtime: {
