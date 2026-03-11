@@ -10,16 +10,16 @@
 </script>
 
 <div class="toolbar">
-  <button class="btn btn-primary" onclick={onRefresh} disabled={scanning}>
+  <button class="btn btn-primary" onclick={onRefresh} disabled={scanning} title="Ctrl+R">
     <span class:spin={scanning}>↺</span>
     刷新设备
   </button>
   <div class="divider"></div>
-  <button class="btn" onclick={onCopy}>
+  <button class="btn" onclick={onCopy} title="Ctrl+C（选中设备后）">
     <span>⌘ C</span>
     复制信息
   </button>
-  <button class="btn" onclick={onExport}>
+  <button class="btn" onclick={onExport} title="Ctrl+E">
     <span>↓</span>
     导出数据
   </button>

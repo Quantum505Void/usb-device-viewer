@@ -23,14 +23,16 @@
     );
   }
 
-  let groups = $derived(() => {
-    const usb = devices.filter(d => !d.isBluetooth);
-    const bt  = devices.filter(d => d.isBluetooth);
-    return [
-      ...(usb.length ? [{ key: "usb", label: `USB 设备 (${usb.length})`, items: usb }] : []),
-      ...(bt.length  ? [{ key: "bt",  label: `蓝牙 HID (${bt.length})`,  items: bt  }] : []),
-    ];
-  });
+  let groups = $derived(
+    (() => {
+      const usb = devices.filter(d => !d.isBluetooth);
+      const bt  = devices.filter(d => d.isBluetooth);
+      return [
+        ...(usb.length ? [{ key: "usb", label: `USB 设备 (${usb.length})`, items: usb }] : []),
+        ...(bt.length  ? [{ key: "bt",  label: `蓝牙 HID (${bt.length})`,  items: bt  }] : []),
+      ];
+    })()
+  );
 
   // ── 搜索高亮 ──
   function highlight(text: string): string {
@@ -82,7 +84,7 @@
     </div>
   {:else}
     <div class="list">
-      {#each groups() as group (group.key)}
+      {#each groups as group (group.key)}
         {@const collapsed = collapsedGroups.has(group.label)}
         <button class="group-label" onclick={() => toggleGroup(group.label)}>
           <span class="group-chevron" class:collapsed>{collapsed ? "▶" : "▼"}</span>
