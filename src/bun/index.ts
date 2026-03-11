@@ -1,55 +1,40 @@
-import { BrowserWindow, BrowserView, Tray, Utils } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Tray, Utils, Screen } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
-import { tmpdir } from "os";
-import { existsSync, writeFileSync, rmSync } from "fs";
 import net from "net";
 
-// ─── 解构 Electrobun Utils ────────────────────────────────────────────────────
+// ─── Electrobun 原生 API ──────────────────────────────────────────────────────
 const { clipboardWriteText, showNotification, showItemInFolder, paths, quit } = Utils;
 
-// ─── 单实例：TCP socket 互斥 + focus 信号 ────────────────────────────────────
-// 固定端口监听。第一个实例 listen 成功 → 主实例。
-// 第二个实例 connect 成功 → 发 "focus\n" 通知主实例显示窗口，然后退出。
-const SINGLE_INSTANCE_PORT = 47291; // 随机私有端口，不占用公共端口
+// ─── 单实例互斥 + 激活已有窗口 ───────────────────────────────────────────────
+const SINGLE_INSTANCE_PORT = 47291;
 
-function setupSingleInstance(): Promise<boolean> {
+async function setupSingleInstance(): Promise<boolean> {
   return new Promise((resolve) => {
-    // 先尝试连接，判断是否已有实例
     const probe = net.createConnection(SINGLE_INSTANCE_PORT, "127.0.0.1");
 
     probe.once("connect", () => {
-      // 已有实例运行 → 发 focus 信号 → 退出
       probe.write("focus\n");
       probe.end();
       probe.once("close", () => resolve(false));
     });
 
     probe.once("error", () => {
-      // 没有监听者 → 本进程是第一个实例，启动 server
       probe.destroy();
-
       const server = net.createServer((socket) => {
         socket.on("data", (data) => {
-          if (data.toString().includes("focus")) {
-            showWindow();
-          }
+          if (data.toString().includes("focus")) showWindow();
         });
         socket.on("error", () => {});
       });
-
-      server.listen(SINGLE_INSTANCE_PORT, "127.0.0.1", () => {
-        resolve(true); // 主实例
-      });
-
-      server.on("error", () => resolve(true)); // 端口占用（极端情况），继续运行
+      server.listen(SINGLE_INSTANCE_PORT, "127.0.0.1", () => resolve(true));
+      server.on("error", () => resolve(true));
     });
   });
 }
 
-const isMainInstance = await setupSingleInstance();
-if (!isMainInstance) {
-  process.exit(0); // 第二个实例，已通知主实例，退出
+if (!await setupSingleInstance()) {
+  process.exit(0);
 }
 
 // ─── HID 扫描 ─────────────────────────────────────────────────────────────────
@@ -63,12 +48,12 @@ async function loadHID() {
 }
 
 const VENDOR_NAMES: Record<number, string> = {
-  0x046d: "Logitech",   0x045e: "Microsoft",    0x05ac: "Apple",
-  0x04d9: "Holtek",     0x0483: "STMicro",       0x1532: "Razer",
-  0x1b1c: "Corsair",    0x046a: "Cherry",        0x17ef: "Lenovo",
-  0x0b05: "ASUS",       0x03f0: "HP",            0x04ca: "Lite-On",
-  0x258a: "SinoWealth", 0x24ae: "Shenzhen",      0x0c45: "Microdia",
-  0x1a2c: "China Resource",  0x0e8f: "GreenAsia",
+  0x046d: "Logitech",   0x045e: "Microsoft",  0x05ac: "Apple",
+  0x04d9: "Holtek",     0x0483: "STMicro",     0x1532: "Razer",
+  0x1b1c: "Corsair",    0x046a: "Cherry",      0x17ef: "Lenovo",
+  0x0b05: "ASUS",       0x03f0: "HP",          0x04ca: "Lite-On",
+  0x258a: "SinoWealth", 0x24ae: "Shenzhen",    0x0c45: "Microdia",
+  0x1a2c: "China Resource", 0x0e8f: "GreenAsia",
 };
 
 function isBT(dev: Record<string, unknown>): boolean {
@@ -128,8 +113,7 @@ async function scanDevices(): Promise<HIDDevice[]> {
       vid, pid,
       vendor: vendor(dev),
       product: ((dev.product as string)?.trim()) || `HID ${vid}:${pid}`,
-      serial,
-      isBluetooth: isBT(dev),
+      serial, isBluetooth: isBT(dev),
       rawInfo: buildRawInfo(dev),
     });
   }
@@ -145,7 +129,10 @@ let monitorInterval: ReturnType<typeof setInterval> | null = null;
 let lastDeviceIds = new Set<string>();
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let isQuitting = false; // 标记托盘"退出"流程，跳过重建逻辑
+let isQuitting = false;
+
+// 窗口上次的位置/大小（重建时恢复）
+let savedFrame = { x: -1, y: -1, width: 1280, height: 860 };
 
 // ─── RPC ──────────────────────────────────────────────────────────────────────
 const rpc = BrowserView.defineRPC<AppRPCType>({
@@ -157,34 +144,22 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
         lastDeviceIds = new Set(devices.map(deviceId));
         return devices;
       },
-
       exportDevices: async ({ devices }) => {
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, "0");
         const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
         const outPath = join(paths.documents, `usb_devices_${ts}.txt`);
-
         const header = `USB 设备列表\n导出时间: ${now.toLocaleString("zh-CN")}\n系统: ${process.platform}\n设备总数: ${devices.length}\n${"=".repeat(80)}\n\n`;
         const body = devices.map((d, i) => `设备 #${i+1}\n${d.rawInfo}\n${"-".repeat(80)}\n`).join("\n");
         await Bun.write(outPath, header + body);
-
-        // 原生：在文件管理器中高亮显示导出文件
         showItemInFolder(outPath);
-
         return { success: true, path: outPath };
       },
-
-      // 原生剪贴板 API（无需 xclip/xsel/pbcopy）
       copyToClipboard: async ({ text }) => {
-        try {
-          clipboardWriteText(text);
-          return { success: true };
-        } catch (e) {
-          console.error("clipboard error:", e);
-          return { success: false };
-        }
+        try { clipboardWriteText(text); return { success: true }; }
+        catch (e) { console.error("clipboard error:", e); return { success: false }; }
       },
-
+      // 窗口 X 按钮 / 自定义关闭按钮 → minimize 到托盘
       minimizeToTray: async () => {
         hideWindow();
         return { success: true };
@@ -194,36 +169,88 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
   },
 });
 
-// ─── 窗口 ─────────────────────────────────────────────────────────────────────
+// ─── 窗口管理 ─────────────────────────────────────────────────────────────────
+
+/**
+ * 创建窗口。
+ * 若 savedFrame.x == -1（首次），居中显示；
+ * 否则恢复上次位置。
+ * Linux 上 titleBarStyle:"hidden" 无效，原生 X 按钮仍存在。
+ * close 事件触发时窗口已销毁，无法拦截。
+ * 策略：close 后重建，放到屏幕外（不可见），等托盘"显示"时移回来。
+ */
 function createWindow() {
+  const offscreen = savedFrame.x === -1;
+
   win = new BrowserWindow({
     title: "USB 设备查看器",
     url: "views://mainview/index.html",
-    titleBarStyle: "hidden",   // 隐藏原生标题栏和关闭按钮，UI 自绘
-    frame: { width: 1280, height: 860, minWidth: 1000, minHeight: 600 },
+    titleBarStyle: "hidden",  // macOS: 无原生控件；Linux: 无效但无害
+    frame: {
+      // 首次：让 Electrobun 居中（x:0 y:0 → 默认）
+      // 重建时：放到屏幕外，等 showWindow 移回来
+      x: offscreen ? 0 : -32000,
+      y: offscreen ? 0 : -32000,
+      width: savedFrame.width,
+      height: savedFrame.height,
+      minWidth: 1000,
+      minHeight: 600,
+    },
     rpc,
   });
 
-  // close 事件：titleBarStyle:hidden 后只有 Alt+F4 / 系统级关闭才触发
-  // 此时用 minimize 替代（窗口未销毁时有效）
   win.on("close", () => {
     if (isQuitting) return;
-    // 窗口已销毁，标记为不可见；下次托盘"显示"时重建
+    // 保存关窗前的位置
+    try { savedFrame = win!.getFrame(); } catch { /* 忽略 */ }
     win = null;
+    // 重建并藏到屏幕外，不要 minimize（避免闪烁）
     setTimeout(() => {
       if (!isQuitting) createWindow();
-    }, 200);
+    }, 100);
   });
 }
 
+function centerWindow(width: number, height: number) {
+  try {
+    const p = Screen.getPrimaryDisplay();
+    const cx = Math.floor((p.workArea.width - width) / 2) + p.workArea.x;
+    const cy = Math.floor((p.workArea.height - height) / 2) + p.workArea.y;
+    win?.setPosition(cx, cy);
+  } catch { win?.setPosition(100, 100); }
+}
+
 function showWindow() {
-  if (!win) { createWindow(); return; }
-  try { win.unminimize(); } catch { /* 窗口状态异常，忽略 */ }
+  if (!win) {
+    createWindow();
+    setTimeout(() => {
+      if (!win) return;
+      try {
+        const f = win.getFrame();
+        if (f.x < -1000) centerWindow(f.width, f.height);
+        win.unminimize();
+        win.focus();
+      } catch { /* 忽略 */ }
+    }, 200);
+    return;
+  }
+
+  try {
+    const f = win.getFrame();
+    if (f.x < -1000) centerWindow(f.width, f.height);
+    win.unminimize();
+    win.focus();
+  } catch { /* 忽略 */ }
 }
 
 function hideWindow() {
   if (!win) return;
-  try { win.minimize(); } catch { /* 忽略 */ }
+  try {
+    // 保存当前位置
+    savedFrame = { ...savedFrame, ...win.getFrame() };
+    // 移到屏幕外（不销毁，不minimize，不闪烁）
+    win.setPosition(-32000, -32000);
+  } catch { /* 忽略 */ }
 }
 
 // ─── 热插拔监控 ───────────────────────────────────────────────────────────────
@@ -235,11 +262,9 @@ function startMonitor() {
       const currentIds = new Set(devices.map(deviceId));
       const added   = [...currentIds].filter(id => !lastDeviceIds.has(id));
       const removed = [...lastDeviceIds].filter(id => !currentIds.has(id));
-
       if (added.length === 0 && removed.length === 0) return;
       lastDeviceIds = currentIds;
 
-      // 原生桌面通知
       if (added.length > 0) {
         const d = devices.find(x => added.includes(deviceId(x)));
         showNotification({
@@ -249,17 +274,11 @@ function startMonitor() {
         });
       }
       if (removed.length > 0) {
-        showNotification({
-          title: "USB 设备已断开",
-          body: `${removed.length} 个设备已移除`,
-          silent: true,
-        });
+        showNotification({ title: "USB 设备已断开", body: `${removed.length} 个设备已移除`, silent: true });
       }
 
       win?.webview.rpc.send.devicesUpdated({ added: added.length, removed: removed.length, addedIds: added });
-    } catch (e) {
-      console.error("Monitor error:", e);
-    }
+    } catch (e) { console.error("Monitor error:", e); }
   }, 2000);
 }
 
@@ -269,8 +288,11 @@ function quitApp() {
   isQuitting = true;
   if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
   tray?.remove();
-  quit(); // Electrobun 原生退出，正确清理 GTK/WebKit
+  quit();
 }
+
+process.on("SIGINT",  () => quitApp());
+process.on("SIGTERM", () => quitApp());
 
 // ─── 托盘 ─────────────────────────────────────────────────────────────────────
 try {
@@ -281,16 +303,21 @@ try {
     { label: "显示窗口", action: "show" },
     { label: "隐藏窗口", action: "hide" },
     { type: "separator" },
-    { label: "退出",     action: "quit" },
+    { label: "退出", action: "quit" },
   ]);
   tray.on("tray-clicked", (event: any) => {
     const action = event?.data?.action ?? event?.action ?? "";
     if      (action === "quit") quitApp();
     else if (action === "show") showWindow();
     else if (action === "hide") hideWindow();
-    else { // 点击图标本身：切换
-      if (win?.isMinimized()) showWindow();
-      else hideWindow();
+    else {
+      // 点击图标本身：切换显示/隐藏
+      try {
+        const f = win?.getFrame();
+        const isHidden = !win || (f && f.x < -1000) || win.isMinimized();
+        if (isHidden) showWindow();
+        else hideWindow();
+      } catch { showWindow(); }
     }
   });
 } catch (e) {
