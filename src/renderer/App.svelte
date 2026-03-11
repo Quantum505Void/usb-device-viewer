@@ -112,6 +112,18 @@
   });
 </script>
 
+<!-- 全局快捷键 -->
+<svelte:window onkeydown={(e) => {
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === "r" || e.key === "R") { e.preventDefault(); refresh(); }
+    if (e.key === "e" || e.key === "E") { e.preventDefault(); exportAll(); }
+    if ((e.key === "f" || e.key === "F") && !e.shiftKey) {
+      e.preventDefault();
+      document.querySelector<HTMLInputElement>(".searchbar input")?.focus();
+    }
+  }
+}} />
+
 <div class="app">
   <!-- Toast -->
   <Toast {toasts} />
@@ -143,9 +155,11 @@
     <!-- 设备列表 -->
     <DeviceList
       devices={filteredDevices}
+      {query}
       {newDeviceIds}
       bind:selected={selectedDevice}
       onOpen={openModal}
+      onCopy={(dev) => copyDevice(dev)}
     />
   </main>
 
