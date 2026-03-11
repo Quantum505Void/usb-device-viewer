@@ -13,6 +13,7 @@
   <button class="btn btn-primary" onclick={onRefresh} disabled={scanning} title="Ctrl+R">
     <span class:spin={scanning}>↺</span>
     刷新设备
+    <kbd>R</kbd>
   </button>
   <div class="divider"></div>
   <button class="btn" onclick={onCopy} title="Ctrl+C（选中设备后）">
@@ -22,6 +23,7 @@
   <button class="btn" onclick={onExport} title="Ctrl+E">
     <span>↓</span>
     导出数据
+    <kbd>E</kbd>
   </button>
   <div class="count-chip">
     {deviceCount} 个设备
@@ -66,6 +68,21 @@
     background: linear-gradient(135deg, #4f52d3 0%, #7c4fd6 100%);
     color: #fff;
   }
+  .btn-primary kbd { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.6); }
+
+  kbd {
+    display: inline-block;
+    font-size: 10px;
+    font-family: 'Consolas', monospace;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 3px;
+    padding: 0 4px;
+    color: rgba(255,255,255,0.4);
+    line-height: 16px;
+    margin-left: 2px;
+  }
+  .btn kbd { background: rgba(0,0,0,0.15); border-color: #2a2b35; color: #374151; }
 
   .divider {
     width: 1px;
