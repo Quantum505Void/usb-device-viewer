@@ -18,6 +18,41 @@
   let lastScanTime = $state<Date | null>(null);
   let activeFilter = $state<"all" | "usb" | "bt">("all");
 
+  // ── Sidebar resize ──
+  let sidebarWidth = $state(220);
+  const SIDEBAR_MIN = 160;
+  const SIDEBAR_MAX = 360;
+  let isResizing = $state(false);
+
+  function startResize(e: MouseEvent) {
+    isResizing = true;
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const onMove = (ev: MouseEvent) => {
+      sidebarWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startW + ev.clientX - startX));
+    };
+    const onUp = () => {
+      isResizing = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  // ── 设备在线时长 ──
+  let deviceOnlineTime = $state<Map<string, number>>(new Map());
+  let nowMs = $state(Date.now());
+  setInterval(() => { nowMs = Date.now(); }, 1000);
+
+  function fmtDuration(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m${s % 60 > 0 ? ` ${s % 60}s` : ""}`;
+    return `${Math.floor(m / 60)}h ${m % 60}m`;
+  }
+
   type ToastItem = { id: number; msg: string; type: "success" | "warning" | "info" | "error" };
   let toasts = $state<ToastItem[]>([]);
   let toastId = 0;
@@ -68,6 +103,13 @@
       allDevices = devices;
       newDeviceIds = new Set();
       lastScanTime = new Date();
+      // 初始化在线时长
+      const now = Date.now();
+      devices.forEach(d => {
+        const key = `${d.vid}:${d.pid}:${d.serial}`;
+        if (!deviceOnlineTime.has(key)) deviceOnlineTime.set(key, now);
+      });
+      deviceOnlineTime = new Map(deviceOnlineTime);
       statusText = `已找到 ${devices.length} 个设备`;
     } catch (e) {
       statusText = `扫描失败: ${e}`;
@@ -84,6 +126,13 @@
       allDevices = devices;
       lastScanTime = new Date();
       newDeviceIds = new Set(addedIds);
+      // 记录新插入设备的上线时间
+      const now = Date.now();
+      addedIds.forEach(id => { deviceOnlineTime.set(id, now); });
+      // 清理已断开设备
+      const curKeys = new Set(devices.map(d => `${d.vid}:${d.pid}:${d.serial}`));
+      for (const k of deviceOnlineTime.keys()) { if (!curKeys.has(k)) deviceOnlineTime.delete(k); }
+      deviceOnlineTime = new Map(deviceOnlineTime);
       const parts = [];
       if (added > 0) parts.push(`+${added} 新设备`);
       if (removed > 0) parts.push(`-${removed} 已移除`);
@@ -138,7 +187,7 @@
   <Toast {toasts} />
 
   <!-- ── 侧边栏 ── -->
-  <aside class="sidebar">
+  <aside class="sidebar" style="width:{sidebarWidth}px">
     <!-- Logo -->
     <div class="sidebar-logo">
       <div class="logo-mark">
@@ -230,6 +279,14 @@
     </div>
   </aside>
 
+  <!-- ── Resize handle ── -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="resize-handle"
+    class:active={isResizing}
+    onmousedown={startResize}
+  ></div>
+
   <!-- ── 主内容 ── -->
   <div class="main-wrap">
     <!-- 顶部搜索栏 -->
@@ -252,6 +309,9 @@
         devices={filteredDevices}
         {query}
         {newDeviceIds}
+        {nowMs}
+        {deviceOnlineTime}
+        {fmtDuration}
         bind:selected={selectedDevice}
         onOpen={openModal}
         onCopy={(dev) => copyDevice(dev)}
@@ -290,14 +350,46 @@
 
   /* ══ SIDEBAR ══ */
   .sidebar {
-    width: 220px;
     flex-shrink: 0;
     background: #0a0a10;
-    border-right: 1px solid #1a1b24;
+    border-right: none;
     display: flex;
     flex-direction: column;
     padding: 0 0 12px;
     gap: 0;
+    min-width: 160px;
+    max-width: 360px;
+    transition: none;
+  }
+
+  /* Resize handle */
+  .resize-handle {
+    width: 4px;
+    background: #1a1b24;
+    cursor: col-resize;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    position: relative;
+  }
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 40px;
+    border-radius: 2px;
+    background: #2a2b36;
+    transition: background 0.15s;
+  }
+  .resize-handle:hover,
+  .resize-handle.active {
+    background: #22233a;
+  }
+  .resize-handle:hover::after,
+  .resize-handle.active::after {
+    background: #6366f1;
   }
 
   /* Logo */

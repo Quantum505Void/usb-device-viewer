@@ -4,12 +4,15 @@
   type Props = {
     devices: HIDDevice[];
     newDeviceIds: Set<string>;
-    query: string;          // 新增：用于高亮
+    query: string;
     selected: HIDDevice | null;
+    nowMs: number;
+    deviceOnlineTime: Map<string, number>;
+    fmtDuration: (ms: number) => string;
     onOpen: (dev: HIDDevice) => void;
     onCopy: (dev: HIDDevice) => void;
   };
-  let { devices, newDeviceIds, query = "", selected = $bindable(), onOpen, onCopy }: Props = $props();
+  let { devices, newDeviceIds, query = "", selected = $bindable(), nowMs, deviceOnlineTime, fmtDuration, onOpen, onCopy }: Props = $props();
 
   function getId(d: HIDDevice) { return `${d.vid}:${d.pid}:${d.serial}`; }
 
@@ -102,6 +105,8 @@
             {@const id = getId(dev)}
             {@const isNew = newDeviceIds.has(id)}
             {@const isSelected = selected && getId(selected) === id}
+            {@const onlineMs = deviceOnlineTime.get(id)}
+            {@const onlineStr = onlineMs ? fmtDuration(nowMs - onlineMs) : null}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
@@ -140,6 +145,9 @@
                 <div class="id-chip">PID <span>{@html highlight(dev.pid)}</span></div>
                 {#if dev.serial && dev.serial !== "N/A"}
                   <div class="serial-chip">{dev.serial.slice(0, 14)}</div>
+                {/if}
+                {#if onlineStr}
+                  <div class="online-chip" title="在线时长">⏱ {onlineStr}</div>
                 {/if}
                 <div class="detail-hint">双击详情 →</div>
               </div>
@@ -348,6 +356,17 @@
     color: #4b5563;
     font-family: 'Consolas', 'Monaco', monospace;
   }
+  .online-chip {
+    font-size: 11px;
+    color: #374151;
+    background: #12131a;
+    border: 1px solid #1e1f28;
+    border-radius: 5px;
+    padding: 1px 6px;
+    white-space: nowrap;
+    transition: color 0.12s;
+  }
+  .item.selected .online-chip { color: #4b5563; border-color: #2a2b3f; }
   .detail-hint {
     font-size: 11px;
     color: #2a2b35;
