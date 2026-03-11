@@ -99,16 +99,22 @@ function deviceId(d: HIDDevice) { return `${d.vid}:${d.pid}:${d.serial}`; }
 async function scanDevices(): Promise<HIDDevice[]> {
   const hid = await loadHID();
   if (!hid) return [];
-  const seen = new Set<string>();
-  const result: HIDDevice[] = [];
+  // 按 vid:pid:serial:bt 分组，同一物理设备的多个接口合并为一条
+  const groups = new Map<string, Record<string, unknown>>();
   for (const dev of hid.devices() as Record<string, unknown>[]) {
     const vid = ((dev.vendorId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
     const pid = ((dev.productId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
     if (vid === "0000" && pid === "0000") continue;
     const serial = (dev.serialNumber as string)?.trim() || "N/A";
-    const key = `${vid}:${pid}:${serial}:${dev.path}:${dev.interface}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const bt = isBT(dev) ? "bt" : "usb";
+    const key = `${vid}:${pid}:${serial}:${bt}`;
+    if (!groups.has(key)) groups.set(key, dev);
+  }
+  const result: HIDDevice[] = [];
+  for (const dev of groups.values()) {
+    const vid = ((dev.vendorId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
+    const pid = ((dev.productId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
+    const serial = (dev.serialNumber as string)?.trim() || "N/A";
     result.push({
       vid, pid,
       vendor: vendor(dev),
