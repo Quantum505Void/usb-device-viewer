@@ -131,9 +131,6 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 
-// 窗口上次的位置/大小（重建时恢复）
-let savedFrame = { x: -1, y: -1, width: 1280, height: 860 };
-
 // ─── RPC ──────────────────────────────────────────────────────────────────────
 const rpc = BrowserView.defineRPC<AppRPCType>({
   maxRequestTime: 10000,
@@ -179,78 +176,42 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
  * close 事件触发时窗口已销毁，无法拦截。
  * 策略：close 后重建，放到屏幕外（不可见），等托盘"显示"时移回来。
  */
-function createWindow() {
-  const offscreen = savedFrame.x === -1;
+// ─── 窗口管理 ─────────────────────────────────────────────────────────────────
 
+function createWindow() {
   win = new BrowserWindow({
     title: "USB 设备查看器",
     url: "views://mainview/index.html",
-    titleBarStyle: "hidden",  // macOS: 无原生控件；Linux: 无效但无害
-    frame: {
-      // 首次：让 Electrobun 居中（x:0 y:0 → 默认）
-      // 重建时：放到屏幕外，等 showWindow 移回来
-      x: offscreen ? 0 : -32000,
-      y: offscreen ? 0 : -32000,
-      width: savedFrame.width,
-      height: savedFrame.height,
-      minWidth: 1000,
-      minHeight: 600,
-    },
+    frame: { width: 1280, height: 860, minWidth: 1000, minHeight: 600 },
     rpc,
   });
 
+  // Linux: close 事件在窗口已销毁后触发，无法拦截。
+  // exitOnLastWindowClosed:false 保证进程不退出。
+  // 点 X → minimize 到任务栏是 Linux 标准行为，此处同步状态即可。
   win.on("close", () => {
     if (isQuitting) return;
-    // 保存关窗前的位置
-    try { savedFrame = win!.getFrame(); } catch { /* 忽略 */ }
     win = null;
-    // 重建并藏到屏幕外，不要 minimize（避免闪烁）
-    setTimeout(() => {
-      if (!isQuitting) createWindow();
-    }, 100);
   });
 }
 
-function centerWindow(width: number, height: number) {
-  try {
-    const p = Screen.getPrimaryDisplay();
-    const cx = Math.floor((p.workArea.width - width) / 2) + p.workArea.x;
-    const cy = Math.floor((p.workArea.height - height) / 2) + p.workArea.y;
-    win?.setPosition(cx, cy);
-  } catch { win?.setPosition(100, 100); }
-}
-
+// 显示窗口（从最小化/隐藏恢复）
 function showWindow() {
   if (!win) {
+    // 窗口被意外销毁（如强制 kill），重建
     createWindow();
-    setTimeout(() => {
-      if (!win) return;
-      try {
-        const f = win.getFrame();
-        if (f.x < -1000) centerWindow(f.width, f.height);
-        win.unminimize();
-        win.focus();
-      } catch { /* 忽略 */ }
-    }, 200);
     return;
   }
-
   try {
-    const f = win.getFrame();
-    if (f.x < -1000) centerWindow(f.width, f.height);
     win.unminimize();
     win.focus();
-  } catch { /* 忽略 */ }
+  } catch { /* 窗口状态异常，忽略 */ }
 }
 
+// 隐藏到托盘：最小化到任务栏（Linux 标准方式）
 function hideWindow() {
   if (!win) return;
-  try {
-    // 保存当前位置
-    savedFrame = { ...savedFrame, ...win.getFrame() };
-    // 移到屏幕外（不销毁，不minimize，不闪烁）
-    win.setPosition(-32000, -32000);
-  } catch { /* 忽略 */ }
+  try { win.minimize(); } catch { /* 忽略 */ }
 }
 
 // ─── 热插拔监控 ───────────────────────────────────────────────────────────────
@@ -312,12 +273,9 @@ try {
     else if (action === "hide") hideWindow();
     else {
       // 点击图标本身：切换显示/隐藏
-      try {
-        const f = win?.getFrame();
-        const isHidden = !win || (f && f.x < -1000) || win.isMinimized();
-        if (isHidden) showWindow();
-        else hideWindow();
-      } catch { showWindow(); }
+      const hidden = !win || win.isMinimized();
+      if (hidden) showWindow();
+      else hideWindow();
     }
   });
 } catch (e) {
