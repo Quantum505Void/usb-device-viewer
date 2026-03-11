@@ -167,10 +167,15 @@
   }
 
   onMount(async () => {
-    refresh();
+    await refresh();   // 先等 scan 完成，lastDeviceIds 基准就绪
     setupMonitor();
     // 通知 bun 端 webview 已就绪，触发热插拔监控启动
-    await electroview.rpc.request.webviewReady({});
+    try {
+      await electroview.rpc.request.webviewReady({});
+      console.log("[renderer] webviewReady sent");
+    } catch (e) {
+      console.warn("[renderer] webviewReady failed:", e);
+    }
   });
 </script>
 

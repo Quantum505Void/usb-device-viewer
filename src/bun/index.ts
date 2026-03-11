@@ -163,7 +163,7 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
         catch (e) { console.error("clipboard error:", e); return { success: false }; }
       },
       webviewReady: async () => {
-        // 前端就绪后再启动热插拔监控，避免 webview 未 ready 时消息丢失
+        console.log("[bun] webviewReady received, starting monitor");
         startMonitor();
         return { success: true };
       },
@@ -232,6 +232,7 @@ function hideWindow() {
 // ─── 热插拔监控 ───────────────────────────────────────────────────────────────
 function startMonitor() {
   if (monitorInterval) return;
+  console.log("[bun] monitor started");
   monitorInterval = setInterval(async () => {
     try {
       const devices = await scanDevices();
@@ -239,6 +240,7 @@ function startMonitor() {
       const added   = [...currentIds].filter(id => !lastDeviceIds.has(id));
       const removed = [...lastDeviceIds].filter(id => !currentIds.has(id));
       if (added.length === 0 && removed.length === 0) return;
+      console.log(`[bun] hotplug: +${added.length} -${removed.length}`, added, removed);
       lastDeviceIds = currentIds;
 
       if (added.length > 0) {
