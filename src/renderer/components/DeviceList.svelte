@@ -15,11 +15,11 @@
 
   // ── 分组（支持折叠）──
   let collapsedGroups = $state<Set<string>>(new Set());
-  function toggleGroup(label: string) {
+  function toggleGroup(key: string) {
     collapsedGroups = new Set(
-      collapsedGroups.has(label)
-        ? [...collapsedGroups].filter(l => l !== label)
-        : [...collapsedGroups, label]
+      collapsedGroups.has(key)
+        ? [...collapsedGroups].filter(k => k !== key)
+        : [...collapsedGroups, key]
     );
   }
 
@@ -27,9 +27,13 @@
     (() => {
       const usb = devices.filter(d => !d.isBluetooth);
       const bt  = devices.filter(d => d.isBluetooth);
+      // 只有一类时不显示分组 header（sidebar 已做分类）
+      if (usb.length === 0 || bt.length === 0) {
+        return [{ key: "all", label: null, items: devices }];
+      }
       return [
-        ...(usb.length ? [{ key: "usb", label: `USB 设备 (${usb.length})`, items: usb }] : []),
-        ...(bt.length  ? [{ key: "bt",  label: `蓝牙 HID (${bt.length})`,  items: bt  }] : []),
+        { key: "usb", label: `USB 设备 (${usb.length})`, items: usb },
+        { key: "bt",  label: `蓝牙 HID (${bt.length})`,  items: bt  },
       ];
     })()
   );
@@ -85,11 +89,13 @@
   {:else}
     <div class="list">
       {#each groups as group (group.key)}
-        {@const collapsed = collapsedGroups.has(group.label)}
-        <button class="group-label" onclick={() => toggleGroup(group.label)}>
-          <span class="group-chevron" class:collapsed>{collapsed ? "▶" : "▼"}</span>
-          {group.label}
-        </button>
+        {@const collapsed = group.label ? collapsedGroups.has(group.key) : false}
+        {#if group.label}
+          <button class="group-label" onclick={() => toggleGroup(group.key)}>
+            <span class="group-chevron" class:collapsed>{collapsed ? "▶" : "▼"}</span>
+            {group.label}
+          </button>
+        {/if}
 
         {#if !collapsed}
           {#each group.items as dev, i (getId(dev))}
