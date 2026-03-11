@@ -1,18 +1,8 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
+node_modules/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-Model/*/
-Data/
-
-# Logs
-logs/
-*.log
-
-uv.lock
+build/
+artifacts/
+*.dist
+*.build
+.DS_Store
+.idea/

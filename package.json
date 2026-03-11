@@ -1,0 +1,21 @@
+{
+  "name": "usb-device-viewer",
+  "version": "3.0.0",
+  "description": "跨平台USB HID设备查看工具",
+  "type": "module",
+  "main": "src/bun/index.ts",
+  "scripts": {
+    "start": "bun run ./node_modules/.bin/electrobun dev",
+    "build": "bun run ./node_modules/.bin/electrobun build",
+    "dev": "bun run ./node_modules/.bin/electrobun dev"
+  },
+  "dependencies": {
+    "electrobun": "latest",
+    "node-hid": "^3.1.0"
+  },
+  "author": {
+    "name": "Wang Yu",
+    "email": "moke521_wang@163.com"
+  },
+  "license": "MIT"
+}
