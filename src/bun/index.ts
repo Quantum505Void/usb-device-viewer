@@ -162,6 +162,11 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
         try { clipboardWriteText(text); return { success: true }; }
         catch (e) { console.error("clipboard error:", e); return { success: false }; }
       },
+      webviewReady: async () => {
+        // 前端就绪后再启动热插拔监控，避免 webview 未 ready 时消息丢失
+        startMonitor();
+        return { success: true };
+      },
     },
     messages: {},
   },
@@ -248,7 +253,7 @@ function startMonitor() {
         showNotification({ title: "USB 设备已断开", body: `${removed.length} 个设备已移除`, silent: true });
       }
 
-      win?.webview.rpc.send.devicesUpdated({ added: added.length, removed: removed.length, addedIds: added });
+      win?.webview.rpc.send.devicesUpdated({ added: added.length, removed: removed.length, addedIds: added, removedIds: removed });
     } catch (e) { console.error("Monitor error:", e); }
   }, 2000);
 }
@@ -297,4 +302,3 @@ GlobalShortcut.register("F12", () => { win?.webview.toggleDevTools(); });
 
 // ─── 启动 ─────────────────────────────────────────────────────────────────────
 await createWindow();
-setTimeout(startMonitor, 1500);

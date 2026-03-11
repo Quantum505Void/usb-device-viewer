@@ -25,6 +25,10 @@ export type AppRPCType = {
         params: { text: string };
         response: { success: boolean };
       };
+      webviewReady: {
+        params: Record<string, never>;
+        response: { success: boolean };
+      };
     };
     messages: Record<string, never>;
   }>;
@@ -35,6 +39,7 @@ export type AppRPCType = {
         added: number;
         removed: number;
         addedIds: string[];
+        removedIds: string[];
       };
     };
   }>;

@@ -121,17 +121,15 @@
 
   // ── 监控变化 ──
   function setupMonitor() {
-    onDeviceChanged(async ({ added, removed, addedIds }) => {
+    onDeviceChanged(async ({ added, removed, addedIds, removedIds }) => {
       const devices = await electroview.rpc.request.scanDevices({});
       allDevices = devices;
       lastScanTime = new Date();
       newDeviceIds = new Set(addedIds);
-      // 记录新插入设备的上线时间
       const now = Date.now();
       addedIds.forEach(id => { deviceOnlineTime.set(id, now); });
-      // 清理已断开设备
-      const curKeys = new Set(devices.map(d => `${d.vid}:${d.pid}:${d.serial}`));
-      for (const k of deviceOnlineTime.keys()) { if (!curKeys.has(k)) deviceOnlineTime.delete(k); }
+      // 精确清理已断开设备（用 removedIds，不依赖全量 scan）
+      removedIds.forEach(id => deviceOnlineTime.delete(id));
       deviceOnlineTime = new Map(deviceOnlineTime);
       const parts = [];
       if (added > 0) parts.push(`+${added} 新设备`);
@@ -168,7 +166,12 @@
     modalOpen = true;
   }
 
-  onMount(() => { refresh(); setupMonitor(); });
+  onMount(async () => {
+    refresh();
+    setupMonitor();
+    // 通知 bun 端 webview 已就绪，触发热插拔监控启动
+    await electroview.rpc.request.webviewReady({});
+  });
 </script>
 
 <!-- 全局快捷键 -->

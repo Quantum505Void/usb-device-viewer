@@ -4,7 +4,7 @@ import { Electroview } from "electrobun/view";
 import type { AppRPCType } from "../shared/types";
 
 // 设备变化事件的简单回调注册
-type DeviceChangedCallback = (payload: { added: number; removed: number; addedIds: string[] }) => void;
+type DeviceChangedCallback = (payload: { added: number; removed: number; addedIds: string[]; removedIds: string[] }) => void;
 let _onDeviceChanged: DeviceChangedCallback | null = null;
 
 export function onDeviceChanged(cb: DeviceChangedCallback) {
