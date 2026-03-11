@@ -11,13 +11,8 @@ export default {
     bun: {
       entrypoint: "src/bun/index.ts",
     },
-    views: {
-      mainview: {
-        entrypoint: "src/renderer/main.ts",
-      },
-    },
     copy: {
-      "src/renderer/index.html": "views/mainview/index.html",
+      "src/renderer-dist": "views/mainview",
     },
   },
 } satisfies ElectrobunConfig;

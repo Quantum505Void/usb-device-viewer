@@ -5,9 +5,10 @@
   "type": "module",
   "main": "src/bun/index.ts",
   "scripts": {
-    "start": "bun run ./node_modules/.bin/electrobun dev",
-    "build": "bun run ./node_modules/.bin/electrobun build",
-    "dev": "bun run ./node_modules/.bin/electrobun dev"
+    "vite:build": "vite build",
+    "start": "bun run vite:build && bun run ./node_modules/.bin/electrobun dev",
+    "build": "bun run vite:build && bun run ./node_modules/.bin/electrobun build",
+    "dev": "bun run vite:build && bun run ./node_modules/.bin/electrobun dev"
   },
   "dependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
@@ -22,6 +23,7 @@
   "license": "MIT",
   "devDependencies": {
     "bun-plugin-svelte": "^0.0.6",
-    "tailwindcss": "^4.2.1"
+    "tailwindcss": "^4.2.1",
+    "vite": "^7.3.1"
   }
 }
