@@ -1,0 +1,6 @@
+{
+  "terminal.integrated.env.linux": {
+    "PATH": "/home/void/.bun/bin:${env:PATH}"
+  },
+  "terminal.integrated.defaultProfile.linux": "zsh"
+}
