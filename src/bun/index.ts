@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserView, Tray, Utils, Screen } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Tray, Utils } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
 import net from "net";
@@ -156,26 +156,11 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
         try { clipboardWriteText(text); return { success: true }; }
         catch (e) { console.error("clipboard error:", e); return { success: false }; }
       },
-      // 窗口 X 按钮 / 自定义关闭按钮 → minimize 到托盘
-      minimizeToTray: async () => {
-        hideWindow();
-        return { success: true };
-      },
     },
     messages: {},
   },
 });
 
-// ─── 窗口管理 ─────────────────────────────────────────────────────────────────
-
-/**
- * 创建窗口。
- * 若 savedFrame.x == -1（首次），居中显示；
- * 否则恢复上次位置。
- * Linux 上 titleBarStyle:"hidden" 无效，原生 X 按钮仍存在。
- * close 事件触发时窗口已销毁，无法拦截。
- * 策略：close 后重建，放到屏幕外（不可见），等托盘"显示"时移回来。
- */
 // ─── 窗口管理 ─────────────────────────────────────────────────────────────────
 
 function createWindow() {
@@ -186,29 +171,19 @@ function createWindow() {
     rpc,
   });
 
-  // Linux: close 事件在窗口已销毁后触发，无法拦截。
-  // exitOnLastWindowClosed:false 保证进程不退出。
-  // 点 X → minimize 到任务栏是 Linux 标准行为，此处同步状态即可。
   win.on("close", () => {
     if (isQuitting) return;
     win = null;
   });
 }
 
-// 显示窗口（从最小化/隐藏恢复）
+// 显示窗口（从最小化恢复）
 function showWindow() {
-  if (!win) {
-    // 窗口被意外销毁（如强制 kill），重建
-    createWindow();
-    return;
-  }
-  try {
-    win.unminimize();
-    win.focus();
-  } catch { /* 窗口状态异常，忽略 */ }
+  if (!win) { createWindow(); return; }
+  try { win.unminimize(); win.focus(); } catch { /* 忽略 */ }
 }
 
-// 隐藏到托盘：最小化到任务栏（Linux 标准方式）
+// 隐藏到任务栏（Linux 标准托盘行为）
 function hideWindow() {
   if (!win) return;
   try { win.minimize(); } catch { /* 忽略 */ }
