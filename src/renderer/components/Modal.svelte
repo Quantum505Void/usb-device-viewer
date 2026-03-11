@@ -80,7 +80,7 @@
         {#each rows as row}
           <div class="detail-row">
             <div class="detail-key">{row.key}</div>
-            <div class="detail-val" class:hex={isHex(row.val)} class:path={isPath(row.val)}>{row.val}</div>
+            <div class="detail-val" class:hex={isHex(row.val)} class:path={isPath(row.val)} title={isPath(row.val) ? row.val : undefined}>{row.val}</div>
           </div>
         {/each}
       </div>

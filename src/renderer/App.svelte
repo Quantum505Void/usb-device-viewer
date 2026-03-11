@@ -132,7 +132,7 @@
   <header class="titlebar">
     <div class="logo">
       <span class="logo-icon">🔌</span>
-      <span class="logo-text">USB Device Viewer</span>
+      <span class="logo-text">USB <em>Device</em> Viewer</span>
       <span class="logo-badge">v3.0</span>
     </div>
     <Toolbar
@@ -234,6 +234,13 @@
     font-weight: 600;
     color: #e2e4e9;
     letter-spacing: -0.01em;
+  }
+  .logo-text em {
+    font-style: normal;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
   .logo-badge {
     font-size: 11px;

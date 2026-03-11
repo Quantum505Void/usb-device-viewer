@@ -1,4 +1,4 @@
-name: Build
+name: Build & Release
 
 on:
   push:
@@ -19,6 +19,8 @@ jobs:
             platform: windows-x64
           - os: macos-latest
             platform: macos-arm64
+          - os: macos-13
+            platform: macos-x64
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.platform }})
@@ -31,26 +33,33 @@ jobs:
         with:
           bun-version: latest
 
-      # Linux: 安装 libudev（node-hid 依赖）
-      - name: Install libudev (Linux)
+      # Linux: node-hid 需要 libudev + libhidapi
+      - name: Install native deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev
+
+      # Windows: node-hid 需要 node-gyp 编译环境
+      - name: Install build tools (Windows)
+        if: runner.os == 'Windows'
+        run: npm install -g node-gyp
+        shell: bash
 
       - name: Install dependencies
         run: bun install
 
-      - name: Build
-        run: bun run build
+      - name: Build renderer
+        run: bun run vite:build
+
+      - name: Build app
+        run: bun run ./node_modules/.bin/electrobun build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
-          path: |
-            build/
-            artifacts/
-          if-no-files-found: warn
-          retention-days: 14
+          path: build/
+          if-no-files-found: error
+          retention-days: 30
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -65,8 +74,13 @@ jobs:
         with:
           path: dist/
 
+      - name: List artifacts
+        run: find dist/ -type f | sort
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/**/*
           generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}

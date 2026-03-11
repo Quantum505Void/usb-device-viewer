@@ -24,7 +24,7 @@
       type="text"
       value={inputVal}
       oninput={handleInput}
-      placeholder="搜索设备... VID · PID · 厂商 · 产品 · 序列号"
+      placeholder="搜索设备名称、VID/PID、厂商..."
       class="search-input"
     />
     {#if inputVal}
