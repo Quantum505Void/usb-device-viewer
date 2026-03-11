@@ -19,8 +19,6 @@ jobs:
             platform: windows-x64
           - os: macos-latest
             platform: macos-arm64
-          - os: macos-13
-            platform: macos-x64
 
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.platform }})
