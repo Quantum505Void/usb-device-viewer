@@ -1,5 +1,4 @@
 import type { ElectrobunConfig } from "electrobun";
-import { SveltePlugin } from "bun-plugin-svelte";
 
 export default {
   app: {
@@ -15,7 +14,6 @@ export default {
     views: {
       mainview: {
         entrypoint: "src/renderer/main.ts",
-        plugins: [SveltePlugin({ development: false })],
       },
     },
     copy: {
