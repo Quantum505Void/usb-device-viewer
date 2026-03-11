@@ -25,6 +25,10 @@ export type AppRPCType = {
         params: { text: string };
         response: { success: boolean };
       };
+      minimizeToTray: {
+        params: Record<string, never>;
+        response: { success: boolean };
+      };
     };
     messages: Record<string, never>;
   }>;

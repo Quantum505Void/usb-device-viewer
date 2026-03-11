@@ -5,6 +5,20 @@ import { homedir, tmpdir } from "os";
 import { existsSync, writeFileSync, rmSync } from "fs";
 
 // ──────────────────────────────────────────────
+// 吞掉 Electrobun 关窗时抛的 "Can't focus window" 异常
+// 防止 uncaughtException crash handler 强制退出进程
+// ──────────────────────────────────────────────
+process.prependListener("uncaughtException", (err: Error, origin: string) => {
+  const msg = err?.message ?? String(err);
+  if (msg.includes("Can't focus window") || msg.includes("Window no longer exists")) {
+    // 已知 Electrobun bug：关窗后残留 focus 调用，安全忽略
+    return;
+  }
+  // 其他未知异常照常上报
+  console.error("[uncaughtException]", msg, origin);
+});
+
+// ──────────────────────────────────────────────
 // 单实例互斥锁（跨平台）
 // ──────────────────────────────────────────────
 const LOCK_FILE = join(tmpdir(), "usb-device-viewer.lock");
@@ -245,6 +259,10 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
           return { success: false };
         }
       },
+      minimizeToTray: async () => {
+        hideWindow();
+        return { success: true };
+      },
     },
     messages: {},
   },
@@ -254,17 +272,31 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
 // 创建窗口
 // ──────────────────────────────────────────────
 
-win = new BrowserWindow({
-  title: "USB 设备查看器",
-  url: "views://mainview/index.html",
-  frame: {
-    width: 1280,
-    height: 860,
-    minWidth: 1000,
-    minHeight: 600,
-  },
-  rpc,
-});
+function createWindow() {
+  win = new BrowserWindow({
+    title: "USB 设备查看器",
+    url: "views://mainview/index.html",
+    frame: {
+      width: 1280,
+      height: 860,
+      minWidth: 1000,
+      minHeight: 600,
+    },
+    rpc,
+  });
+
+  win.on("close", () => {
+    windowVisible = false;
+    // 关窗后重建，下次托盘"显示"时有窗口可用
+    setTimeout(() => {
+      createWindow();
+      // 立刻最小化，等用户通过托盘显示
+      setTimeout(() => win?.minimize(), 300);
+    }, 100);
+  });
+}
+
+createWindow();
 
 // ──────────────────────────────────────────────
 // 系统托盘
@@ -274,13 +306,23 @@ let tray: Tray | null = null;
 let windowVisible = true;
 
 function showWindow() {
-  win?.show();
-  windowVisible = true;
+  if (!win) return;
+  try {
+    win.unminimize();
+    windowVisible = true;
+  } catch (e) {
+    console.warn("[tray] show failed:", e);
+  }
 }
 
 function hideWindow() {
-  win?.minimize();
-  windowVisible = false;
+  if (!win) return;
+  try {
+    win.minimize();
+    windowVisible = false;
+  } catch (e) {
+    console.warn("[tray] hide failed:", e);
+  }
 }
 
 function quitApp() {
@@ -292,9 +334,9 @@ function quitApp() {
 
 try {
   tray = new Tray({
-    image: join(import.meta.dir, "../../tray-icon.png"),
-    width: 16,
-    height: 16,
+    image: "views://mainview/tray-icon.svg",
+    width: 22,
+    height: 22,
   });
 
   tray.setMenu([
@@ -307,7 +349,9 @@ try {
   ]);
 
   tray.on("tray-clicked", (event: any) => {
-    const action = event?.action ?? "";
+    // event 结构: { name: "tray-clicked", data: { id, action, data? } }
+    const action = event?.data?.action ?? event?.action ?? "";
+    console.log("[tray] clicked, action:", action, "raw:", JSON.stringify(event));
     if (action === "quit") {
       quitApp();
     } else if (action === "show") {
@@ -315,7 +359,7 @@ try {
     } else if (action === "hide") {
       hideWindow();
     } else {
-      // 单击图标本身：切换显示
+      // 单击图标本身（action 为空）：切换显示
       if (windowVisible) hideWindow();
       else showWindow();
     }
@@ -323,11 +367,5 @@ try {
 } catch (e) {
   console.warn("托盘初始化失败:", e);
 }
-
-// 关闭按钮 → 最小化到托盘（不退出）
-win.on("close", () => {
-  windowVisible = false;
-  // 不调用 releaseLock/process.exit，保持后台运行
-});
 
 setTimeout(startMonitor, 1500);

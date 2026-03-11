@@ -107,6 +107,14 @@
   onMount(() => {
     refresh();
     setupMonitor();
+
+    // 拦截窗口关闭：改为最小化到托盘
+    window.addEventListener("beforeunload", (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+      electroview.rpc.request.minimizeToTray({});
+      return false;
+    });
   });
 </script>
 
