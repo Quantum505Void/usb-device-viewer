@@ -172,7 +172,7 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
 function createWindow() {
   win = new BrowserWindow({
     title: "USB 设备查看器",
-    url: "views://mainview/index.html",
+    url: process.env.DEV_SERVER ?? "views://mainview/index.html",
     frame: { width: 1280, height: 860, minWidth: 1000, minHeight: 600 },
     rpc,
   });
