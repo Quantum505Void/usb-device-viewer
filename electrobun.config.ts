@@ -13,6 +13,10 @@ export default {
     },
     copy: {
       "src/renderer-dist": "views/mainview",
+      "tray-icon.png": "tray-icon.png",
     },
+  },
+  runtime: {
+    exitOnLastWindowClosed: false,
   },
 } satisfies ElectrobunConfig;
