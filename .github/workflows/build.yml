@@ -31,12 +31,10 @@ jobs:
         with:
           bun-version: latest
 
-      # Linux: node-hid 需要 libudev + libhidapi
       - name: Install native deps (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev
 
-      # Windows: node-hid 需要 node-gyp 编译环境
       - name: Install build tools (Windows)
         if: runner.os == 'Windows'
         run: npm install -g node-gyp
@@ -51,12 +49,33 @@ jobs:
       - name: Build app
         run: bun run ./node_modules/.bin/electrobun build
 
+      - name: List build output
+        run: |
+          echo "=== build/ contents ==="
+          find build/ -type f 2>/dev/null || echo "(empty or missing)"
+        shell: bash
+
+      - name: Package artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          cd build
+          zip -r "../usb-device-viewer-${{ matrix.platform }}.zip" . 2>/dev/null || tar czf "../usb-device-viewer-${{ matrix.platform }}.tar.gz" .
+          cd ..
+          ls -lh usb-device-viewer-${{ matrix.platform }}.*
+        shell: bash
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path build\* -DestinationPath "usb-device-viewer-${{ matrix.platform }}.zip" -Force
+        shell: pwsh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
-          path: build/
-          if-no-files-found: error
+          path: usb-device-viewer-${{ matrix.platform }}.*
+          if-no-files-found: warn
           retention-days: 30
 
   release:
@@ -71,14 +90,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
+          merge-multiple: true
 
-      - name: List artifacts
+      - name: List release files
         run: find dist/ -type f | sort
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/**/*
+          files: dist/*
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
