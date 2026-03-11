@@ -107,14 +107,6 @@
   onMount(() => {
     refresh();
     setupMonitor();
-
-    // 拦截窗口关闭：改为最小化到托盘
-    window.addEventListener("beforeunload", (e) => {
-      e.preventDefault();
-      e.returnValue = "";
-      electroview.rpc.request.minimizeToTray({});
-      return false;
-    });
   });
 </script>
 
@@ -122,24 +114,33 @@
   <!-- Toast -->
   <Toast {toasts} />
 
-  <!-- 标题栏 -->
+  <!-- 标题栏（自定义，支持拖动 + 窗口控件）-->
   <header class="titlebar">
-    <div class="titlebar-inner">
+    <div class="titlebar-drag">
       <div class="logo">
         <span class="logo-icon">🔌</span>
         <span class="logo-text">USB Device Viewer</span>
         <span class="logo-badge">v3.0</span>
       </div>
-      <Toolbar
-        {scanning}
-        deviceCount={allDevices.length}
-        onRefresh={refresh}
-        onExport={exportAll}
-        onCopy={() => {
-          if (selectedDevice) copyDevice(selectedDevice);
-          else toast("请先选中一个设备", "warning");
-        }}
-      />
+    </div>
+    <Toolbar
+      {scanning}
+      deviceCount={allDevices.length}
+      onRefresh={refresh}
+      onExport={exportAll}
+      onCopy={() => {
+        if (selectedDevice) copyDevice(selectedDevice);
+        else toast("请先选中一个设备", "warning");
+      }}
+    />
+    <!-- 窗口控件（no-drag 区域）-->
+    <div class="win-controls">
+      <button class="win-btn minimize" onclick={() => electroview.rpc.request.minimizeToTray({})} title="最小化到托盘">
+        <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="2" rx="1" fill="currentColor"/></svg>
+      </button>
+      <button class="win-btn close" onclick={() => electroview.rpc.request.minimizeToTray({})} title="关闭到托盘">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
     </div>
   </header>
 
@@ -203,18 +204,34 @@
     border-bottom: 1px solid #1e1f26;
     background: #0d0d12;
     flex-shrink: 0;
-  }
-  .titlebar-inner {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 10px 20px;
-    gap: 16px;
+    padding: 0 12px 0 16px;
+    gap: 12px;
+    height: 48px;
+    /* 整个标题栏可拖动 */
+    app-region: drag;
+    -webkit-app-region: drag;
+  }
+  /* 拖动区（logo部分） */
+  .titlebar-drag {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    app-region: drag;
+    -webkit-app-region: drag;
+    min-width: 0;
+  }
+  /* 工具栏和窗口控件不可拖动 */
+  :global(.toolbar), .win-controls {
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
   }
   .logo {
     display: flex;
     align-items: center;
     gap: 8px;
+    pointer-events: none; /* 拖动区内容不拦截鼠标 */
   }
   .logo-icon { font-size: 18px; }
   .logo-text {
@@ -222,6 +239,7 @@
     font-weight: 600;
     color: #e2e4e9;
     letter-spacing: -0.01em;
+    white-space: nowrap;
   }
   .logo-badge {
     font-size: 11px;
@@ -231,6 +249,28 @@
     border-radius: 20px;
     border: 1px solid #2a2b35;
   }
+  /* 窗口控件 */
+  .win-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .win-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .win-btn:hover { background: #1e1f26; color: #e2e4e9; }
+  .win-btn.close:hover { background: #3f1515; color: #f87171; }
 
   /* ── 主内容 ── */
   .main {
