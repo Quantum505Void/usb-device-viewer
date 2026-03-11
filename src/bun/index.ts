@@ -3,39 +3,54 @@ import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
 import { tmpdir } from "os";
 import { existsSync, writeFileSync, rmSync } from "fs";
+import net from "net";
 
-// ─── 解构 Electrobun Utils（原生跨平台 API）───────────────────────────────────
-const {
-  clipboardWriteText,
-  showNotification,
-  showItemInFolder,
-  paths,
-  quit,
-} = Utils;
+// ─── 解构 Electrobun Utils ────────────────────────────────────────────────────
+const { clipboardWriteText, showNotification, showItemInFolder, paths, quit } = Utils;
 
-// ─── 单实例锁 ────────────────────────────────────────────────────────────────
-const LOCK_FILE = join(tmpdir(), "usb-device-viewer.lock");
+// ─── 单实例：TCP socket 互斥 + focus 信号 ────────────────────────────────────
+// 固定端口监听。第一个实例 listen 成功 → 主实例。
+// 第二个实例 connect 成功 → 发 "focus\n" 通知主实例显示窗口，然后退出。
+const SINGLE_INSTANCE_PORT = 47291; // 随机私有端口，不占用公共端口
 
-function acquireLock(): boolean {
-  if (existsSync(LOCK_FILE)) {
-    try {
-      const pid = parseInt(Bun.file(LOCK_FILE).toString(), 10);
-      if (!isNaN(pid) && pid !== process.pid) {
-        try { process.kill(pid, 0); console.warn(`已有实例运行 PID ${pid}`); return false; }
-        catch { /* 进程不存在，锁文件是残留 */ }
-      }
-    } catch { /* 忽略 */ }
-  }
-  writeFileSync(LOCK_FILE, String(process.pid));
-  return true;
+function setupSingleInstance(): Promise<boolean> {
+  return new Promise((resolve) => {
+    // 先尝试连接，判断是否已有实例
+    const probe = net.createConnection(SINGLE_INSTANCE_PORT, "127.0.0.1");
+
+    probe.once("connect", () => {
+      // 已有实例运行 → 发 focus 信号 → 退出
+      probe.write("focus\n");
+      probe.end();
+      probe.once("close", () => resolve(false));
+    });
+
+    probe.once("error", () => {
+      // 没有监听者 → 本进程是第一个实例，启动 server
+      probe.destroy();
+
+      const server = net.createServer((socket) => {
+        socket.on("data", (data) => {
+          if (data.toString().includes("focus")) {
+            showWindow();
+          }
+        });
+        socket.on("error", () => {});
+      });
+
+      server.listen(SINGLE_INSTANCE_PORT, "127.0.0.1", () => {
+        resolve(true); // 主实例
+      });
+
+      server.on("error", () => resolve(true)); // 端口占用（极端情况），继续运行
+    });
+  });
 }
 
-function releaseLock() { try { rmSync(LOCK_FILE); } catch { /* 忽略 */ } }
-
-if (!acquireLock()) process.exit(0);
-process.on("exit",   releaseLock);
-process.on("SIGINT",  () => quitApp());
-process.on("SIGTERM", () => quitApp());
+const isMainInstance = await setupSingleInstance();
+if (!isMainInstance) {
+  process.exit(0); // 第二个实例，已通知主实例，退出
+}
 
 // ─── HID 扫描 ─────────────────────────────────────────────────────────────────
 let hidModule: typeof import("node-hid") | null = null;
@@ -254,7 +269,6 @@ function quitApp() {
   isQuitting = true;
   if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
   tray?.remove();
-  releaseLock();
   quit(); // Electrobun 原生退出，正确清理 GTK/WebKit
 }
 
