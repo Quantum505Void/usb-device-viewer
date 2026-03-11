@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserView, Tray, Utils, GlobalShortcut } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Tray, Utils, GlobalShortcut, Updater } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
 import net from "net";
@@ -168,11 +168,27 @@ const rpc = BrowserView.defineRPC<AppRPCType>({
 });
 
 // ─── 窗口管理 ─────────────────────────────────────────────────────────────────
+const DEV_SERVER_URL = "http://localhost:5174";
 
-function createWindow() {
+async function getMainViewUrl(): Promise<string> {
+  const channel = await Updater.localInfo.channel();
+  if (channel === "dev") {
+    try {
+      await fetch(DEV_SERVER_URL, { method: "HEAD" });
+      console.log(`HMR enabled: ${DEV_SERVER_URL}`);
+      return DEV_SERVER_URL;
+    } catch {
+      console.log("Vite dev server not running, using views://");
+    }
+  }
+  return "views://mainview/index.html";
+}
+
+async function createWindow() {
+  const url = await getMainViewUrl();
   win = new BrowserWindow({
     title: "USB 设备查看器",
-    url: process.env.DEV_SERVER ?? "views://mainview/index.html",
+    url,
     frame: { width: 1280, height: 860, minWidth: 1000, minHeight: 600 },
     rpc,
   });
@@ -267,5 +283,5 @@ try {
 GlobalShortcut.register("F12", () => { win?.webview.toggleDevTools(); });
 
 // ─── 启动 ─────────────────────────────────────────────────────────────────────
-createWindow();
+await createWindow();
 setTimeout(startMonitor, 1500);
