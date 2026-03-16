@@ -4,7 +4,7 @@ export default {
   app: {
     name: "USB Device Viewer",
     identifier: "com.waasstt.usb-device-viewer",
-    version: "3.0.0",
+    version: "3.0.7",
     description: "跨平台USB HID设备查看工具",
   },
   build: {
