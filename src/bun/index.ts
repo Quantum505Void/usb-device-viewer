@@ -2,6 +2,7 @@ import { BrowserWindow, BrowserView, Tray, Utils, GlobalShortcut, Updater } from
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
 import net from "net";
+import { enumerateDevices, closeLib } from "./hid-ffi";
 
 // ─── Electrobun 原生 API ──────────────────────────────────────────────────────
 const { clipboardWriteText, showNotification, showItemInFolder, paths, quit } = Utils;
@@ -37,91 +38,18 @@ if (!await setupSingleInstance()) {
   process.exit(0);
 }
 
-// ─── HID 扫描 ─────────────────────────────────────────────────────────────────
-let hidModule: typeof import("node-hid") | null = null;
-async function loadHID() {
-  if (!hidModule) {
-    try { hidModule = await import("node-hid"); }
-    catch { console.error("node-hid 加载失败"); }
-  }
-  return hidModule;
-}
-
-const VENDOR_NAMES: Record<number, string> = {
-  0x046d: "Logitech",   0x045e: "Microsoft",  0x05ac: "Apple",
-  0x04d9: "Holtek",     0x0483: "STMicro",     0x1532: "Razer",
-  0x1b1c: "Corsair",    0x046a: "Cherry",      0x17ef: "Lenovo",
-  0x0b05: "ASUS",       0x03f0: "HP",          0x04ca: "Lite-On",
-  0x258a: "SinoWealth", 0x24ae: "Shenzhen",    0x0c45: "Microdia",
-  0x1a2c: "China Resource", 0x0e8f: "GreenAsia",
-};
-
-function isBT(dev: Record<string, unknown>): boolean {
-  if (dev.busType === 2) return true;
-  const p = typeof dev.path === "string" ? dev.path.toLowerCase() : "";
-  if (p.includes("bluetooth") || p.includes("bth")) return true;
-  if (dev.interface === -1) {
-    const up = (dev.usagePage as number) ?? 0;
-    if (up === 0x01 || up === 0x0c) {
-      const s = `${dev.product ?? ""}${dev.manufacturer ?? ""}`.toLowerCase();
-      if (!["usb", "wired", "有线"].some(k => s.includes(k))) return true;
-    }
-  }
-  return false;
-}
-
-function vendor(dev: Record<string, unknown>): string {
-  const m = (dev.manufacturer as string)?.trim();
-  return (m && m !== "Unknown") ? m : (VENDOR_NAMES[dev.vendorId as number] ?? "未知厂商");
-}
-
-function buildRawInfo(dev: Record<string, unknown>): string {
-  const busNames: Record<number, string> = { 0:"Unknown",1:"USB",2:"Bluetooth",3:"I2C",4:"SPI",5:"Virtual" };
-  const bt = dev.busType as number | undefined;
-  return [
-    `供应商ID (VID): ${((dev.vendorId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase()}`,
-    `产品ID (PID): ${((dev.productId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase()}`,
-    `制造商: ${vendor(dev)}`,
-    `产品名称: ${dev.product ?? "未知"}`,
-    `序列号: ${dev.serialNumber ?? "N/A"}`,
-    bt !== undefined ? `总线类型: ${busNames[bt] ?? `Unknown(${bt})`}` : null,
-    `连接方式: ${isBT(dev) ? "蓝牙HID设备" : "USB有线连接"}`,
-    `设备路径: ${dev.path ?? "N/A"}`,
-    (dev.interface as number) >= 0 ? `USB接口号: ${dev.interface}` : `USB接口号: N/A`,
-    `HID使用页: 0x${((dev.usagePage as number) ?? 0).toString(16).padStart(4,"0").toUpperCase()}`,
-    `HID使用ID: 0x${((dev.usage as number) ?? 0).toString(16).padStart(4,"0").toUpperCase()}`,
-    `设备版本: 0x${((dev.release as number) ?? 0).toString(16).padStart(4,"0").toUpperCase()}`,
-  ].filter(Boolean).join("\n");
-}
+// ─── HID 扫描（via Bun FFI → libhidapi）─────────────────────────────────────
 
 function deviceId(d: HIDDevice) { return `${d.vid}:${d.pid}:${d.serial}`; }
 
 async function scanDevices(): Promise<HIDDevice[]> {
-  const hid = await loadHID();
-  if (!hid) return [];
-  // 按 vid:pid:serial:bt 分组，同一物理设备的多个接口合并为一条
-  const groups = new Map<string, Record<string, unknown>>();
-  for (const dev of hid.devices() as Record<string, unknown>[]) {
-    const vid = ((dev.vendorId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
-    const pid = ((dev.productId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
-    if (vid === "0000" && pid === "0000") continue;
-    const serial = (dev.serialNumber as string)?.trim() || "N/A";
-    const bt = isBT(dev) ? "bt" : "usb";
-    const key = `${vid}:${pid}:${serial}:${bt}`;
-    if (!groups.has(key)) groups.set(key, dev);
+  try {
+    return enumerateDevices();
+  } catch (e) {
+    console.error("HID FFI 扫描失败:", e);
+    return [];
   }
-  const result: HIDDevice[] = [];
-  for (const dev of groups.values()) {
-    const vid = ((dev.vendorId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
-    const pid = ((dev.productId as number) ?? 0).toString(16).padStart(4,"0").toUpperCase();
-    const serial = (dev.serialNumber as string)?.trim() || "N/A";
-    result.push({
-      vid, pid,
-      vendor: vendor(dev),
-      product: ((dev.product as string)?.trim()) || `HID ${vid}:${pid}`,
-      serial, isBluetooth: isBT(dev),
-      rawInfo: buildRawInfo(dev),
-    });
+}
   }
   result.sort((a, b) => {
     if (a.isBluetooth !== b.isBluetooth) return a.isBluetooth ? 1 : -1;
@@ -266,6 +194,7 @@ function quitApp() {
   isQuitting = true;
   if (monitorInterval) { clearInterval(monitorInterval); monitorInterval = null; }
   tray?.remove();
+  closeLib();
   quit();
 }
 
