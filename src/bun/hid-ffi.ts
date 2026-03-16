@@ -28,27 +28,40 @@ import type { HIDDevice } from "../shared/types";
 function resolveLibPath(): string {
   const p = process.platform;
   if (p === "linux") {
-    for (const c of [
+    const candidates = [
+      // AppImage: APPDIR 环境变量指向 AppDir 根目录
+      ...(process.env.APPDIR ? [
+        join(process.env.APPDIR, "usr/lib/libhidapi-hidraw.so.0"),
+        join(process.env.APPDIR, "usr/lib/libhidapi-libusb.so.0"),
+      ] : []),
+      // 系统路径
       "/usr/lib/x86_64-linux-gnu/libhidapi-hidraw.so.0",
       "/usr/lib/x86_64-linux-gnu/libhidapi-libusb.so.0",
       "/usr/lib/aarch64-linux-gnu/libhidapi-hidraw.so.0",
       "/usr/local/lib/libhidapi-hidraw.so.0",
-    ]) if (existsSync(c)) return c;
-    return "libhidapi-hidraw.so.0";
+    ];
+    for (const c of candidates) if (existsSync(c)) return c;
+    return "libhidapi-hidraw.so.0"; // 由 LD_LIBRARY_PATH 解析
   }
   if (p === "darwin") {
-    for (const c of [
+    const candidates = [
+      // app bundle 旁边的 lib 目录（打包时复制进来）
+      join(dirname(process.execPath), "../lib/libhidapi.dylib"),
+      join(dirname(process.execPath), "libhidapi.dylib"),
+      // Homebrew
       "/opt/homebrew/lib/libhidapi.dylib",
       "/usr/local/lib/libhidapi.dylib",
-      join(dirname(process.execPath), "../lib/libhidapi.dylib"),
-    ]) if (existsSync(c)) return c;
+    ];
+    for (const c of candidates) if (existsSync(c)) return c;
     return "libhidapi.dylib";
   }
   if (p === "win32") {
-    for (const c of [
+    const candidates = [
+      // exe 同目录（打包时复制进来）
       join(dirname(process.execPath), "hidapi.dll"),
       join(dirname(process.execPath), "../lib/hidapi.dll"),
-    ]) if (existsSync(c)) return c;
+    ];
+    for (const c of candidates) if (existsSync(c)) return c;
     return "hidapi.dll";
   }
   throw new Error(`Unsupported platform: ${p}`);

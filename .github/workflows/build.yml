@@ -39,10 +39,25 @@ jobs:
             libgtk-3-dev libayatana-appindicator3-dev \
             libfuse2 desktop-file-utils
 
-      - name: Install build tools (Windows)
+      - name: Install native deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install hidapi create-dmg
+
+      - name: Install native deps (Windows)
         if: runner.os == 'Windows'
-        run: npm install -g node-gyp
-        shell: bash
+        shell: pwsh
+        run: |
+          # 下载 hidapi 预编译包（vcpkg 镜像）
+          $url = "https://github.com/libusb/hidapi/releases/download/hidapi-0.14.0/hidapi-win.zip"
+          Invoke-WebRequest -Uri $url -OutFile hidapi-win.zip
+          Expand-Archive -Path hidapi-win.zip -DestinationPath hidapi-win -Force
+          # 找到 x64 dll
+          $dll = Get-ChildItem -Path hidapi-win -Recurse -Filter "hidapi.dll" | Where-Object { $_.FullName -match "x64" } | Select-Object -First 1
+          if (!$dll) {
+            $dll = Get-ChildItem -Path hidapi-win -Recurse -Filter "hidapi.dll" | Select-Object -First 1
+          }
+          echo "HIDAPI_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
+          echo "Found hidapi.dll: $($dll.FullName)"
 
       - name: Install dependencies
         run: bun install
@@ -57,12 +72,21 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
-      # ── Windows: Inno Setup installer (.exe) ───────────────────────────────
+      # ── Windows: 复制 hidapi.dll + Inno Setup installer ───────────────────
+      - name: Copy hidapi.dll into build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $buildDir = Get-ChildItem -Path build -Directory -Recurse | Where-Object { $_.Name -match "USBDeviceViewer" } | Select-Object -First 1
+          $binDir = Join-Path $buildDir.FullName "bin"
+          echo "Copying hidapi.dll to $binDir"
+          Copy-Item -Path $env:HIDAPI_DLL -Destination $binDir -Force
+
       - name: Find build output dir (Windows)
         if: runner.os == 'Windows'
         id: builddir
         run: |
-          $dir = Get-ChildItem -Path build -Directory | Select-Object -First 1
+          $dir = Get-ChildItem -Path build -Recurse -Directory | Where-Object { $_.Name -match "USBDeviceViewer" } | Select-Object -First 1
           echo "BUILD_DIR=$($dir.FullName)" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
@@ -114,52 +138,59 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ── Linux: AppImage (single-file, runs on any distro) ─────────────────
+      # ── Linux: AppImage（含 libhidapi）────────────────────────────────────
       - name: Build AppImage (Linux)
         if: runner.os == 'Linux'
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          # electrobun outputs: build/<platform>/<AppName>/
           BUILD_DIR=$(find build -mindepth 2 -maxdepth 2 -type d | head -1)
           echo "Using build dir: $BUILD_DIR"
-          ls "$BUILD_DIR"
+
           APP_DIR="USBDeviceViewer.AppDir"
+          mkdir -p "$APP_DIR/usr/bin" "$APP_DIR/usr/lib" \
+                   "$APP_DIR/usr/share/applications" \
+                   "$APP_DIR/usr/share/icons/hicolor/256x256/apps"
 
-          mkdir -p "$APP_DIR/usr/bin" "$APP_DIR/usr/lib" "$APP_DIR/usr/share/applications" "$APP_DIR/usr/share/icons/hicolor/256x256/apps"
-
-          # Copy build output
+          # 复制构建产物
           [ -d "$BUILD_DIR/bin" ] && cp -r "$BUILD_DIR/bin/"* "$APP_DIR/usr/bin/" || cp -r "$BUILD_DIR/"* "$APP_DIR/usr/bin/"
           [ -d "$BUILD_DIR/lib" ] && cp -r "$BUILD_DIR/lib/"* "$APP_DIR/usr/lib/" || true
           [ -d "$BUILD_DIR/Resources" ] && cp -r "$BUILD_DIR/Resources" "$APP_DIR/usr/" || true
 
+          # 打包 libhidapi（Bun FFI 运行时需要）
+          for lib in \
+            /usr/lib/x86_64-linux-gnu/libhidapi-hidraw.so.0 \
+            /usr/lib/x86_64-linux-gnu/libhidapi-hidraw.so.0.0.0 \
+            /usr/lib/x86_64-linux-gnu/libudev.so.1; do
+            [ -f "$lib" ] && cp "$lib" "$APP_DIR/usr/lib/" && echo "Copied $lib"
+          done
+
           # Desktop entry
-          cat > "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" <<EOF
+          cat > "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" <<'DESKTOP'
           [Desktop Entry]
           Name=USB Device Viewer
           Exec=USBDeviceViewer
           Icon=usb-device-viewer
           Type=Application
           Categories=Utility;
-          EOF
+          DESKTOP
 
           cp icon.png "$APP_DIR/usr/share/icons/hicolor/256x256/apps/usb-device-viewer.png"
           cp icon.png "$APP_DIR/usb-device-viewer.png"
+          cp "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" "$APP_DIR/"
+          sed -i 's|^Exec=.*|Exec=AppRun|' "$APP_DIR/usb-device-viewer.desktop"
 
-          # AppRun entrypoint
+          # AppRun: 先设 LD_LIBRARY_PATH 再执行
           cat > "$APP_DIR/AppRun" <<'EOF'
           #!/bin/sh
           SELF=$(readlink -f "$0")
           HERE="${SELF%/*}"
           export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
-          exec "$HERE/usr/bin/$(ls "$HERE/usr/bin/" | head -1)" "$@"
+          export APPDIR="$HERE"
+          EXEC=$(ls "$HERE/usr/bin/" | grep -v '\.so' | head -1)
+          exec "$HERE/usr/bin/$EXEC" "$@"
           EOF
           chmod +x "$APP_DIR/AppRun"
 
-          # Desktop file at root
-          cp "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" "$APP_DIR/"
-          sed -i 's|^Exec=.*|Exec=AppRun|' "$APP_DIR/usb-device-viewer.desktop"
-
-          # Download appimagetool
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --no-appstream "$APP_DIR" "USBDeviceViewer-${VERSION}-linux-x64.AppImage"
@@ -173,15 +204,28 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ── macOS: DMG ────────────────────────────────────────────────────────
+      # ── macOS: DMG（含 libhidapi.dylib）──────────────────────────────────
+      - name: Copy libhidapi into app bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          BUILD_DIR=$(find build -mindepth 2 -maxdepth 2 -type d | head -1)
+          # 找 lib 目录，没有则创建
+          LIB_DIR="$BUILD_DIR/lib"
+          mkdir -p "$LIB_DIR"
+          # Homebrew arm64 路径
+          for src in \
+            /opt/homebrew/lib/libhidapi.dylib \
+            /opt/homebrew/lib/libhidapi.0.dylib \
+            /usr/local/lib/libhidapi.dylib; do
+            [ -f "$src" ] && cp "$src" "$LIB_DIR/" && echo "Copied $src"
+          done
+          ls "$LIB_DIR"
+
       - name: Build DMG (macOS)
         if: runner.os == 'macOS'
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           BUILD_DIR=$(find build -mindepth 2 -maxdepth 2 -type d | head -1)
-
-          # create-dmg via brew
-          brew install create-dmg
 
           mkdir -p dmg-source
           cp -r "$BUILD_DIR" dmg-source/
