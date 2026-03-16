@@ -46,19 +46,36 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Package artifact (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: |
-          cd build
-          zip -r "../usb-device-viewer-${{ matrix.platform }}.zip" . 2>/dev/null || tar czf "../usb-device-viewer-${{ matrix.platform }}.tar.gz" .
-        shell: bash
-
-      - name: Package artifact (Windows)
+      - name: Find Windows exe
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path build\* -DestinationPath "usb-device-viewer-${{ matrix.platform }}.zip" -Force
+        id: find_exe
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter "*.exe" | Select-Object -First 1
+          echo "EXE_PATH=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          echo "EXE_NAME=$($exe.Name)" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
-      - name: Upload artifact
+      - name: Upload artifact (Windows exe)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: usb-device-viewer-${{ matrix.platform }}
+          path: ${{ steps.find_exe.outputs.EXE_PATH }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Package artifact (Linux)
+        if: runner.os == 'Linux'
+        run: tar czf "usb-device-viewer-${{ matrix.platform }}.tar.gz" -C build .
+        shell: bash
+
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        run: cd build && zip -r "../usb-device-viewer-${{ matrix.platform }}.zip" .
+        shell: bash
+
+      - name: Upload artifact (Linux/macOS)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
