@@ -41,8 +41,21 @@ if (!await setupSingleInstance()) {
 let hidModule: typeof import("node-hid") | null = null;
 async function loadHID() {
   if (!hidModule) {
-    try { hidModule = await import("node-hid"); }
-    catch { console.error("node-hid 加载失败"); }
+    try {
+      // 优先直接 import（dev 模式 / node_modules 可见时）
+      hidModule = await import("node-hid");
+    } catch {
+      try {
+        // ASAR 打包后 native 模块解包在 app.asar.unpacked 里
+        // import.meta.dir 形如 /.../Resources/app.asar/bun
+        // 需要指向       /.../Resources/app.asar.unpacked/app/node_modules/node-hid
+        const resourcesDir = join(import.meta.dir, "..", "..", "..");
+        const nodehidPath = join(resourcesDir, "app.asar.unpacked", "app", "node_modules", "node-hid");
+        hidModule = await import(nodehidPath);
+      } catch (e2) {
+        console.error("node-hid 加载失败:", e2);
+      }
+    }
   }
   return hidModule;
 }
