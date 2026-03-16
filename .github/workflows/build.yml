@@ -119,15 +119,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          BUILD_DIR=$(find build -mindepth 1 -maxdepth 1 -type d | head -1)
+          # electrobun outputs: build/<platform>/<AppName>/
+          BUILD_DIR=$(find build -mindepth 2 -maxdepth 2 -type d | head -1)
+          echo "Using build dir: $BUILD_DIR"
+          ls "$BUILD_DIR"
           APP_DIR="USBDeviceViewer.AppDir"
 
           mkdir -p "$APP_DIR/usr/bin" "$APP_DIR/usr/lib" "$APP_DIR/usr/share/applications" "$APP_DIR/usr/share/icons/hicolor/256x256/apps"
 
           # Copy build output
-          cp -r "$BUILD_DIR/bin/"* "$APP_DIR/usr/bin/"
-          cp -r "$BUILD_DIR/lib/"* "$APP_DIR/usr/lib/" 2>/dev/null || true
-          cp -r "$BUILD_DIR/Resources" "$APP_DIR/usr/" 2>/dev/null || true
+          [ -d "$BUILD_DIR/bin" ] && cp -r "$BUILD_DIR/bin/"* "$APP_DIR/usr/bin/" || cp -r "$BUILD_DIR/"* "$APP_DIR/usr/bin/"
+          [ -d "$BUILD_DIR/lib" ] && cp -r "$BUILD_DIR/lib/"* "$APP_DIR/usr/lib/" || true
+          [ -d "$BUILD_DIR/Resources" ] && cp -r "$BUILD_DIR/Resources" "$APP_DIR/usr/" || true
 
           # Desktop entry
           cat > "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" <<EOF
@@ -175,7 +178,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          BUILD_DIR=$(find build -mindepth 1 -maxdepth 1 -type d | head -1)
+          BUILD_DIR=$(find build -mindepth 2 -maxdepth 2 -type d | head -1)
 
           # create-dmg via brew
           brew install create-dmg
