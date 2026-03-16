@@ -50,13 +50,6 @@ async function scanDevices(): Promise<HIDDevice[]> {
     return [];
   }
 }
-  }
-  result.sort((a, b) => {
-    if (a.isBluetooth !== b.isBluetooth) return a.isBluetooth ? 1 : -1;
-    return `${a.vid}${a.pid}`.localeCompare(`${b.vid}${b.pid}`);
-  });
-  return result;
-}
 
 // ─── 状态 ─────────────────────────────────────────────────────────────────────
 let monitorInterval: ReturnType<typeof setInterval> | null = null;
