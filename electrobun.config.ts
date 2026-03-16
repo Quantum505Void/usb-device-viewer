@@ -38,6 +38,9 @@ export default {
       },
     },
   },
+  scripts: {
+    preBuild: "scripts/prebuild.ts",
+  },
   runtime: {
     exitOnLastWindowClosed: false,
   },
