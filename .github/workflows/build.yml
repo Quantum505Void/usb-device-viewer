@@ -46,41 +46,98 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Find Windows exe
+      # ── Windows: Inno Setup installer ──────────────────────────────────────
+      - name: Get version
         if: runner.os == 'Windows'
-        id: find_exe
+        id: version
         run: |
-          $exe = Get-ChildItem -Path build -Recurse -Filter "*.exe" | Select-Object -First 1
-          echo "EXE_PATH=$($exe.FullName)" >> $env:GITHUB_OUTPUT
-          echo "EXE_NAME=$($exe.Name)" >> $env:GITHUB_OUTPUT
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
-      - name: Upload artifact (Windows exe)
+      - name: Find build output dir (Windows)
+        if: runner.os == 'Windows'
+        id: builddir
+        run: |
+          $dir = Get-ChildItem -Path build -Directory | Select-Object -First 1
+          echo "BUILD_DIR=$($dir.FullName)" >> $env:GITHUB_OUTPUT
+          echo "APP_NAME=$($dir.Name)" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create Inno Setup script
+        if: runner.os == 'Windows'
+        run: |
+          $buildDir = "${{ steps.builddir.outputs.BUILD_DIR }}"
+          $version  = "${{ steps.version.outputs.VERSION }}"
+          $iss = @"
+          [Setup]
+          AppName=USB Device Viewer
+          AppVersion=$version
+          DefaultDirName={autopf}\USBDeviceViewer
+          DefaultGroupName=USB Device Viewer
+          OutputDir=installer
+          OutputBaseFilename=USBDeviceViewer-$version-windows-x64-setup
+          Compression=lzma2
+          SolidCompression=yes
+          ArchitecturesInstallIn64BitMode=x64
+
+          [Files]
+          Source: "$buildDir\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\USB Device Viewer"; Filename: "{app}\bin\USBDeviceViewer.exe"
+          Name: "{commondesktop}\USB Device Viewer"; Filename: "{app}\bin\USBDeviceViewer.exe"; Tasks: desktopicon
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
+
+          [Run]
+          Filename: "{app}\bin\USBDeviceViewer.exe"; Description: "Launch USB Device Viewer"; Flags: nowait postinstall skipifsilent
+          "@
+          New-Item -ItemType Directory -Force -Path installer | Out-Null
+          $iss | Out-File -FilePath "setup.iss" -Encoding UTF8
+        shell: pwsh
+
+      - name: Build installer with Inno Setup
+        if: runner.os == 'Windows'
+        run: iscc setup.iss
+        shell: cmd
+
+      - name: Upload installer (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
-          path: ${{ steps.find_exe.outputs.EXE_PATH }}
-          if-no-files-found: warn
+          path: installer/*.exe
+          if-no-files-found: error
           retention-days: 30
 
+      # ── Linux ──────────────────────────────────────────────────────────────
       - name: Package artifact (Linux)
         if: runner.os == 'Linux'
         run: tar czf "usb-device-viewer-${{ matrix.platform }}.tar.gz" -C build .
-        shell: bash
 
-      - name: Package artifact (macOS)
-        if: runner.os == 'macOS'
-        run: cd build && zip -r "../usb-device-viewer-${{ matrix.platform }}.zip" .
-        shell: bash
-
-      - name: Upload artifact (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Upload artifact (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
-          path: usb-device-viewer-${{ matrix.platform }}.*
-          if-no-files-found: warn
+          path: usb-device-viewer-${{ matrix.platform }}.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      # ── macOS ──────────────────────────────────────────────────────────────
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        run: cd build && zip -r "../usb-device-viewer-${{ matrix.platform }}.zip" .
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: usb-device-viewer-${{ matrix.platform }}
+          path: usb-device-viewer-${{ matrix.platform }}.zip
+          if-no-files-found: error
           retention-days: 30
 
   release:
