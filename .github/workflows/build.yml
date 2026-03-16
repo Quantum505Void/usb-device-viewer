@@ -33,7 +33,11 @@ jobs:
 
       - name: Install native deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libhidapi-dev libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libhidapi-dev libwebkit2gtk-4.1-dev \
+            libgtk-3-dev libayatana-appindicator3-dev \
+            libfuse2 desktop-file-utils
 
       - name: Install build tools (Windows)
         if: runner.os == 'Windows'
@@ -46,22 +50,20 @@ jobs:
       - name: Build
         run: bun run build
 
-      # ── Windows: Inno Setup installer ──────────────────────────────────────
       - name: Get version
-        if: runner.os == 'Windows'
         id: version
+        shell: bash
         run: |
-          $v = (Get-Content package.json | ConvertFrom-Json).version
-          echo "VERSION=$v" >> $env:GITHUB_OUTPUT
-        shell: pwsh
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
+      # ── Windows: Inno Setup installer (.exe) ───────────────────────────────
       - name: Find build output dir (Windows)
         if: runner.os == 'Windows'
         id: builddir
         run: |
           $dir = Get-ChildItem -Path build -Directory | Select-Object -First 1
           echo "BUILD_DIR=$($dir.FullName)" >> $env:GITHUB_OUTPUT
-          echo "APP_NAME=$($dir.Name)" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
       - name: Create Inno Setup script
@@ -103,7 +105,7 @@ jobs:
         run: iscc setup.iss
         shell: cmd
 
-      - name: Upload installer (Windows)
+      - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
@@ -112,31 +114,90 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # ── Linux ──────────────────────────────────────────────────────────────
-      - name: Package artifact (Linux)
+      # ── Linux: AppImage (single-file, runs on any distro) ─────────────────
+      - name: Build AppImage (Linux)
         if: runner.os == 'Linux'
-        run: tar czf "usb-device-viewer-${{ matrix.platform }}.tar.gz" -C build .
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BUILD_DIR=$(find build -mindepth 1 -maxdepth 1 -type d | head -1)
+          APP_DIR="USBDeviceViewer.AppDir"
+
+          mkdir -p "$APP_DIR/usr/bin" "$APP_DIR/usr/lib" "$APP_DIR/usr/share/applications" "$APP_DIR/usr/share/icons/hicolor/256x256/apps"
+
+          # Copy build output
+          cp -r "$BUILD_DIR/bin/"* "$APP_DIR/usr/bin/"
+          cp -r "$BUILD_DIR/lib/"* "$APP_DIR/usr/lib/" 2>/dev/null || true
+          cp -r "$BUILD_DIR/Resources" "$APP_DIR/usr/" 2>/dev/null || true
+
+          # Desktop entry
+          cat > "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" <<EOF
+          [Desktop Entry]
+          Name=USB Device Viewer
+          Exec=USBDeviceViewer
+          Icon=usb-device-viewer
+          Type=Application
+          Categories=Utility;
+          EOF
+
+          cp icon.png "$APP_DIR/usr/share/icons/hicolor/256x256/apps/usb-device-viewer.png"
+          cp icon.png "$APP_DIR/usb-device-viewer.png"
+
+          # AppRun entrypoint
+          cat > "$APP_DIR/AppRun" <<'EOF'
+          #!/bin/sh
+          SELF=$(readlink -f "$0")
+          HERE="${SELF%/*}"
+          export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
+          exec "$HERE/usr/bin/$(ls "$HERE/usr/bin/" | head -1)" "$@"
+          EOF
+          chmod +x "$APP_DIR/AppRun"
+
+          # Desktop file at root
+          cp "$APP_DIR/usr/share/applications/usb-device-viewer.desktop" "$APP_DIR/"
+          sed -i 's|^Exec=.*|Exec=AppRun|' "$APP_DIR/usb-device-viewer.desktop"
+
+          # Download appimagetool
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --no-appstream "$APP_DIR" "USBDeviceViewer-${VERSION}-linux-x64.AppImage"
 
       - name: Upload artifact (Linux)
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
-          path: usb-device-viewer-${{ matrix.platform }}.tar.gz
+          path: "*.AppImage"
           if-no-files-found: error
           retention-days: 30
 
-      # ── macOS ──────────────────────────────────────────────────────────────
-      - name: Package artifact (macOS)
+      # ── macOS: DMG ────────────────────────────────────────────────────────
+      - name: Build DMG (macOS)
         if: runner.os == 'macOS'
-        run: cd build && zip -r "../usb-device-viewer-${{ matrix.platform }}.zip" .
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BUILD_DIR=$(find build -mindepth 1 -maxdepth 1 -type d | head -1)
+
+          # create-dmg via brew
+          brew install create-dmg
+
+          mkdir -p dmg-source
+          cp -r "$BUILD_DIR" dmg-source/
+
+          create-dmg \
+            --volname "USB Device Viewer $VERSION" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --app-drop-link 450 185 \
+            "USBDeviceViewer-${VERSION}-macos-arm64.dmg" \
+            dmg-source/
 
       - name: Upload artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: usb-device-viewer-${{ matrix.platform }}
-          path: usb-device-viewer-${{ matrix.platform }}.zip
+          path: "*.dmg"
           if-no-files-found: error
           retention-days: 30
 
