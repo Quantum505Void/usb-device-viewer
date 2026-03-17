@@ -171,6 +171,7 @@ export async function enumerateDevices(): Promise<HIDDevice[]> {
       product,
       serial: serial || "N/A",
       isBluetooth,
+      path: dev.path || "",
       rawInfo,
     });
   }

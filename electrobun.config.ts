@@ -19,6 +19,8 @@ export default {
       "dist/assets": "views/mainview/assets",
       "tray-icon.svg": "views/mainview/tray-icon.svg",
       "icon.png": "views/mainview/icon.png",
+      // Linux: udev 规则，供用户手动安装（解决 /dev/hidraw* 无权限问题）
+      "99-usb-hid.rules": "99-usb-hid.rules",
     },
     // 确保 .node 文件不被 ASAR 打包（需要以文件形式存在才能被 require）
     asarUnpack: ["*.node", "*.dll", "*.dylib", "*.so", "*.so.*"],

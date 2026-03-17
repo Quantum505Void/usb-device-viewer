@@ -39,9 +39,13 @@ if (!await setupSingleInstance()) {
   process.exit(0);
 }
 
-// ─── HID 扫描（via Bun FFI → libhidapi）─────────────────────────────────────
+// ─── HID 扫描（via node-hid）────────────────────────────────────────────────
 
-function deviceId(d: HIDDevice) { return `${d.vid}:${d.pid}:${d.serial}`; }
+// 用 path 作为唯一 ID（与 hid-backend dedup key 一致）
+// path 为空时 fallback VID:PID:serial（Windows BT 设备可能没有 path）
+function deviceId(d: HIDDevice) {
+  return d.path || `${d.vid}:${d.pid}:${d.serial}`;
+}
 
 async function scanDevices(): Promise<HIDDevice[]> {
   try {

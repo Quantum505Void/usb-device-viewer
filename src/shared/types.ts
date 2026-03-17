@@ -7,6 +7,8 @@ export type HIDDevice = {
   product: string;
   serial: string;
   isBluetooth: boolean;
+  /** 设备路径（hidraw/IOKit路径），作为热插拔唯一 ID 使用 */
+  path: string;
   rawInfo: string;
 };
 

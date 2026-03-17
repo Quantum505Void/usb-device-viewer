@@ -46,7 +46,8 @@ jobs:
       - name: Install native deps (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install hidapi create-dmg
+          # node-hid 在 macOS 使用系统 IOKit 框架，无需安装 hidapi
+          brew install create-dmg
 
       # Windows: node-hid 使用预编译 .node，无需额外依赖
 
@@ -85,10 +86,12 @@ jobs:
           [ -d "$BUILD_DIR/lib"       ] && cp -r "$BUILD_DIR/lib/"*       "$APP_DIR/usr/lib/" || true
           [ -d "$BUILD_DIR/Resources" ] && cp -r "$BUILD_DIR/Resources"   "$APP_DIR/usr/"     || true
 
-          # 打包 libudev（node-hid hidraw 后端依赖）
+          # 打包 libudev + libusb（node-hid hidraw 后端依赖）
           for lib in \
             /usr/lib/x86_64-linux-gnu/libudev.so.1 \
-            /lib/x86_64-linux-gnu/libudev.so.1; do
+            /lib/x86_64-linux-gnu/libudev.so.1 \
+            /usr/lib/x86_64-linux-gnu/libusb-1.0.so.0 \
+            /lib/x86_64-linux-gnu/libusb-1.0.so.0; do
             [ -f "$lib" ] && cp "$lib" "$APP_DIR/usr/lib/" && echo "Copied $lib"
           done
 
