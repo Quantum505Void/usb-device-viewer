@@ -78,25 +78,28 @@ function readLinuxBusInfo(devPath: string): SysfsBusInfo | null {
   }
 }
 
-// ── 跨平台 fallback：序列号 MAC 地址格式 + 路径关键词 ─────────────────────────
-// macOS/Windows 的蓝牙设备序列号通常是 MAC 地址
+// ── 跨平台 fallback：路径特征 + 序列号 MAC 地址格式 ─────────────────────────
 
 const MAC_PATTERN = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i;
 
+// Windows 蓝牙 HID path 包含 BT HID Service UUID
+// 例：\\?\HID#{00001812-0000-1000-8000-00805f9b34fb}_Dev_VID&...
+const WIN_BT_UUID = "00001812-0000-1000-8000-00805f9b34fb";
+
 function getFallbackBusInfo(dev: HID.Device): { label: string; isBluetooth: boolean } {
-  // 序列号是 MAC 格式 → 蓝牙
-  const serial = dev.serialNumber?.trim() ?? "";
-  if (MAC_PATTERN.test(serial)) {
+  const path = (dev.path ?? "").toLowerCase();
+
+  // Windows: BT HID Service UUID 在 path 里
+  if (path.includes(WIN_BT_UUID)) {
     return { label: "Bluetooth", isBluetooth: true };
   }
-  // 路径关键词
-  const path = (dev.path ?? "").toLowerCase();
-  if (
-    path.includes("bluetooth") ||
-    path.includes("bth") ||
-    path.includes("rfcomm") ||
-    path.includes("00001124")
-  ) {
+  // Linux/macOS 路径关键词
+  if (path.includes("bluetooth") || path.includes("bth") || path.includes("rfcomm")) {
+    return { label: "Bluetooth", isBluetooth: true };
+  }
+  // serial 是 MAC 格式（蓝牙设备）
+  const serial = dev.serialNumber?.trim() ?? "";
+  if (MAC_PATTERN.test(serial)) {
     return { label: "Bluetooth", isBluetooth: true };
   }
   return { label: "USB", isBluetooth: false };
