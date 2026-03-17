@@ -1,13 +1,21 @@
 /**
  * hid-backend.ts — node-hid 跨平台 HID 枚举
  *
- * 使用 node-hid 3.x 预编译 .node addon。Bun 1.1+ 原生支持 .node addon。
+ * node-hid 3.x 预编译 .node addon 未暴露 hidapi 的 bus_type 字段。
+ * 本文件用各平台官方 path 格式还原 bus_type，与 hidapi 源码逻辑严格对齐：
  *
- * 平台：Linux / macOS / Windows (x64 / arm64)
+ * Windows (windows/hid.c: hid_internal_detect_bus_type)
+ *   - 父设备 CompatibleIds 含 "BTHENUM"  → HID_API_BUS_BLUETOOTH (Classic)
+ *   - 父设备 CompatibleIds 含 "BTHLEDEVICE" → HID_API_BUS_BLUETOOTH (LE)
+ *   - path 中体现：经典 BT path 含 "BTHENUM"，BLE path 含 BT HID Service UUID
  *
- * 总线类型检测策略：
- *   Linux  → 读 /sys/class/hidraw/<dev>/device/uevent 里的 HID_ID 字段（最准确）
- *   其他   → 序列号 MAC 地址格式 + 路径关键词 fallback
+ * macOS (mac/hid.c: IOHIDTransportKey)
+ *   - kIOHIDTransportKey 前缀含 "Bluetooth" → HID_API_BUS_BLUETOOTH
+ *   - path 中体现：BT path 含 "Bluetooth" 字样
+ *
+ * Linux (linux/hid.c: parse_hid_vid_pid_from_uevent)
+ *   - 读 /sys/class/hidraw/<dev>/device/uevent HID_ID 字段第一段
+ *   - Linux BUS_BLUETOOTH = 0x0005，BUS_USB = 0x0003，BUS_I2C = 0x0018
  */
 
 import HID from "node-hid";
@@ -31,106 +39,96 @@ const VENDOR_NAMES: Record<number, string> = {
   0x1770: "Nuvoton",         0x1a86: "QinHeng",         0x10c4: "Silicon Labs",
 };
 
-// ── 总线类型常量（HID_ID b字段，与 hidapi bus_type 对齐）─────────────────────
+// ── 总线类型（对齐 hidapi hid_bus_type 枚举）─────────────────────────────────
 
-const BUS_LABELS: Record<number, string> = {
-  0x0000: "Unknown",
-  0x0001: "USB",
-  0x0002: "Bluetooth",   // BT Classic
-  0x0003: "USB",         // USB HID (HID_BUS_USB in some kernels)
-  0x0004: "Bluetooth",   // BT LE
-  0x0005: "Bluetooth",   // Linux BUS_BLUETOOTH = 5
-  0x0006: "Virtual",
-  0x0018: "I2C",         // Linux BUS_I2C = 24 (0x18)
-  0x001c: "SPI",         // Linux BUS_SPI = 28
+const enum BusType { Unknown = 0, USB = 1, Bluetooth = 2, I2C = 3, SPI = 4 }
+
+// ── Linux: sysfs uevent（linux/hid.c: parse_hid_vid_pid_from_uevent）────────
+
+const LINUX_BUS: Record<number, BusType> = {
+  0x0001: BusType.USB,
+  0x0002: BusType.Bluetooth,
+  0x0003: BusType.USB,        // BUS_USB
+  0x0004: BusType.Bluetooth,  // BUS_BT_LE (some kernels)
+  0x0005: BusType.Bluetooth,  // BUS_BLUETOOTH
+  0x0018: BusType.I2C,
+  0x001c: BusType.SPI,
 };
 
-const BT_BUS_IDS = new Set([0x0002, 0x0004, 0x0005]);
-
-// ── Linux: 从 sysfs uevent 读准确总线类型 ─────────────────────────────────────
-
-interface SysfsBusInfo {
-  busId: number;
-  label: string;
-  isBluetooth: boolean;
-}
-
-function readLinuxBusInfo(devPath: string): SysfsBusInfo | null {
-  // devPath 例如 /dev/hidraw2
-  const devName = devPath.split("/").pop(); // "hidraw2"
-  if (!devName) return null;
-
-  const ueventPath = `/sys/class/hidraw/${devName}/device/uevent`;
-  if (!existsSync(ueventPath)) return null;
-
+function getLinuxBusType(devPath: string): BusType | null {
+  const name = devPath.split("/").pop();
+  if (!name) return null;
+  const uevent = `/sys/class/hidraw/${name}/device/uevent`;
+  if (!existsSync(uevent)) return null;
   try {
-    const content = readFileSync(ueventPath, "utf8");
-    // HID_ID=0005:00000B05:00001AB2  → 第一段是 busId（16进制）
-    const match = content.match(/^HID_ID=([0-9A-Fa-f]{4}):/m);
-    if (!match) return null;
-
-    const busId = parseInt(match[1], 16);
-    const label = BUS_LABELS[busId] ?? `BusType(0x${busId.toString(16)})`;
-    const isBluetooth = BT_BUS_IDS.has(busId);
-    return { busId, label, isBluetooth };
-  } catch {
-    return null;
-  }
+    const m = readFileSync(uevent, "utf8").match(/^HID_ID=([0-9A-Fa-f]{4}):/m);
+    if (!m) return null;
+    const id = parseInt(m[1], 16);
+    return LINUX_BUS[id] ?? BusType.Unknown;
+  } catch { return null; }
 }
 
-// ── 跨平台 fallback：路径特征 + 序列号 MAC 地址格式 ─────────────────────────
+// ── Windows: path 特征（windows/hid.c: hid_internal_detect_bus_type）────────
+// CompatibleIds 含 BTHENUM → Classic BT
+// CompatibleIds 含 BTHLEDEVICE → BLE（path 里是 BT HID Service UUID）
+// Windows path 格式：\\?\HID#<transport>_...
+//   USB:   HID#VID_xxxx&PID_xxxx
+//   BT经典: HID#BTHENUM&...  或含 BTHENUM
+//   BLE:   HID#{00001812-0000-1000-8000-00805f9b34fb}_Dev_...
 
-const MAC_PATTERN = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i;
-
-// Windows 蓝牙 HID path 包含 BT HID Service UUID
-// 例：\\?\HID#{00001812-0000-1000-8000-00805f9b34fb}_Dev_VID&...
-const WIN_BT_UUID = "00001812-0000-1000-8000-00805f9b34fb";
-
-function getFallbackBusInfo(dev: HID.Device): { label: string; isBluetooth: boolean } {
-  const path = (dev.path ?? "").toLowerCase();
-
-  // Windows: BT HID Service UUID 在 path 里
-  if (path.includes(WIN_BT_UUID)) {
-    return { label: "Bluetooth", isBluetooth: true };
-  }
-  // Linux/macOS 路径关键词
-  if (path.includes("bluetooth") || path.includes("bth") || path.includes("rfcomm")) {
-    return { label: "Bluetooth", isBluetooth: true };
-  }
-  // serial 是 MAC 格式（蓝牙设备）
-  const serial = dev.serialNumber?.trim() ?? "";
-  if (MAC_PATTERN.test(serial)) {
-    return { label: "Bluetooth", isBluetooth: true };
-  }
-  return { label: "USB", isBluetooth: false };
+function getWindowsBusType(path: string): BusType {
+  const p = path.toUpperCase();
+  // BLE: BT HID over GATT Service UUID 00001812
+  if (p.includes("00001812-0000-1000-8000-00805F9B34FB")) return BusType.Bluetooth;
+  // Classic BT
+  if (p.includes("BTHENUM") || p.includes("BTHLEDEVICE")) return BusType.Bluetooth;
+  // I2C / SPI
+  if (p.includes("PNP0C50") || p.includes("I2CHID")) return BusType.I2C;
+  if (p.includes("PNP0C51")) return BusType.SPI;
+  return BusType.USB;
 }
 
-// ── 获取总线信息（平台分支）───────────────────────────────────────────────────
+// ── macOS: path 特征（mac/hid.c: kIOHIDTransportKey）────────────────────────
+// IOHIDTransportKey 前缀含 "Bluetooth" → BT
+// USB path 含 "IOUSBInterface" 或 "USB"
+// macOS path 例：IOService:/IOResources/IOHIDManager/.../Bluetooth...
 
-function getBusInfo(dev: HID.Device): { label: string; isBluetooth: boolean } {
-  if (process.platform === "linux" && dev.path) {
-    const sysfsInfo = readLinuxBusInfo(dev.path);
-    if (sysfsInfo) return sysfsInfo;
+function getMacBusType(path: string): BusType {
+  const p = path.toLowerCase();
+  if (p.includes("bluetooth")) return BusType.Bluetooth;
+  if (p.includes("i2c")) return BusType.I2C;
+  if (p.includes("spi")) return BusType.SPI;
+  return BusType.USB;
+}
+
+// ── 统一入口 ──────────────────────────────────────────────────────────────────
+
+function detectBusType(dev: HID.Device): BusType {
+  const path = dev.path ?? "";
+  if (process.platform === "linux") {
+    if (path) {
+      const bt = getLinuxBusType(path);
+      if (bt !== null) return bt;
+    }
+  } else if (process.platform === "win32") {
+    if (path) return getWindowsBusType(path);
+  } else if (process.platform === "darwin") {
+    if (path) return getMacBusType(path);
   }
-  return getFallbackBusInfo(dev);
+  return BusType.Unknown;
 }
 
 // ── 同一物理设备去重 ──────────────────────────────────────────────────────────
-// Windows: HID path 每个 interface 都不同（\\?\HID#VID_0B05&PID_1A96&MI_00#...）
-//          → 用 VID:PID:serial 去重（同一物理设备多 interface 只保留第一条）
-// Linux:   path = /dev/hidrawX，每个 hidraw 节点是独立接口，直接用 path
-// macOS:   path = IOKit service path，唯一
+// Linux: path = /dev/hidrawX，每个 hidraw 节点独立，直接用 path
+// Windows/macOS: 多 interface 共享 VID:PID:serial
 
 function getDedupeKey(dev: HID.Device): string {
-  if (process.platform === "linux" && dev.path) {
-    return dev.path; // /dev/hidrawX 天然唯一
-  }
-  // Windows / macOS：VID:PID:serial（serial 通常能区分物理设备）
+  if (process.platform === "linux" && dev.path) return dev.path;
   const serial = dev.serialNumber?.trim() || "";
   return `${dev.vendorId}:${dev.productId}:${serial}`;
 }
 
-// ── 主枚举（async，不阻塞主线程）────────────────────────────────────────────
+// ── 主枚举 ────────────────────────────────────────────────────────────────────
 
 export async function enumerateDevices(): Promise<HIDDevice[]> {
   const rawDevices = await HID.devicesAsync();
@@ -154,7 +152,14 @@ export async function enumerateDevices(): Promise<HIDDevice[]> {
     const vendor  = dev.manufacturer?.trim() || VENDOR_NAMES[vid] || "未知厂商";
     const product = dev.product?.trim() || `HID ${vidStr}:${pidStr}`;
 
-    const { label: busLabel, isBluetooth } = getBusInfo(dev);
+    const busType = detectBusType(dev);
+    const isBluetooth = busType === BusType.Bluetooth;
+    const busLabel = (
+      busType === BusType.Bluetooth ? "Bluetooth" :
+      busType === BusType.I2C       ? "I2C"       :
+      busType === BusType.SPI       ? "SPI"       :
+      busType === BusType.USB       ? "USB"       : "Unknown"
+    );
 
     const rawInfo = [
       `供应商ID (VID)  : ${vidStr}`,
@@ -184,7 +189,6 @@ export async function enumerateDevices(): Promise<HIDDevice[]> {
     });
   }
 
-  // USB/I2C 优先，蓝牙排后；再按 VID+PID 字典序
   result.sort((a, b) => {
     if (a.isBluetooth !== b.isBluetooth) return a.isBluetooth ? 1 : -1;
     return `${a.vid}${a.pid}`.localeCompare(`${b.vid}${b.pid}`);
@@ -193,5 +197,4 @@ export async function enumerateDevices(): Promise<HIDDevice[]> {
   return result;
 }
 
-/** node-hid 不需要显式关闭库 */
 export function closeLib(): void {}

@@ -1,0 +1,11 @@
+--- a/node_modules/node-hid/src/devices.cc
++++ b/node_modules/node-hid/src/devices.cc
+@@ -52,6 +52,9 @@ Napi::Value generateDeviceInfo(const Napi::Env &env, hid_device_info *dev)
+     if (dev->usage)
+     {
+         deviceInfo.Set("usage", Napi::Number::New(env, dev->usage));
+     }
++    // bus_type: 0=Unknown, 1=USB, 2=Bluetooth, 3=I2C, 4=SPI (hidapi >= 0.13)
++    deviceInfo.Set("busType", Napi::Number::New(env, (int)dev->bus_type));
+     return deviceInfo;
+ }
