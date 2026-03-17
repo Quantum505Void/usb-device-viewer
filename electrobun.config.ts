@@ -4,13 +4,14 @@ export default {
   app: {
     name: "USB Device Viewer",
     identifier: "com.waasstt.usb-device-viewer",
-    version: "3.0.7",
+    version: "3.1.0",
     description: "跨平台USB HID设备查看工具",
   },
   build: {
     bun: {
       entrypoint: "src/bun/index.ts",
-      // node-hid 预编译 .node 文件不能被 bundle，作为外部依赖
+      // node-hid 是 .node 原生 addon，不能被 bundle，标记为 external
+      // electrobun build 会自动将 node_modules 中的 .node 文件打包进 Resources
       external: ["node-hid"],
     },
     copy: {
@@ -18,11 +19,9 @@ export default {
       "dist/assets": "views/mainview/assets",
       "tray-icon.svg": "views/mainview/tray-icon.svg",
       "icon.png": "views/mainview/icon.png",
-      // 打包 node-hid prebuilds（所有平台）
-      "node_modules/node-hid/prebuilds": "prebuilds/node-hid",
-      // package.json（node-hid require 解析需要）
-      "node_modules/node-hid/package.json": "prebuilds/node-hid-pkg.json",
     },
+    // 确保 .node 文件不被 ASAR 打包（需要以文件形式存在才能被 require）
+    asarUnpack: ["*.node", "*.dll", "*.dylib", "*.so", "*.so.*"],
     watchIgnore: ["dist/**"],
     platforms: {
       mac: {
