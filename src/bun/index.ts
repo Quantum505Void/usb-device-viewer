@@ -1,4 +1,4 @@
-import { BrowserWindow, BrowserView, Tray, Utils, GlobalShortcut, Updater } from "electrobun/bun";
+import { BrowserWindow, BrowserView, Tray, Utils, GlobalShortcut, Updater, Screen } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
 import * as fs from "fs";
@@ -131,10 +131,21 @@ async function getMainViewUrl(): Promise<string> {
 
 async function createWindow() {
   const url = await getMainViewUrl();
+
+  // Windows DPI 补偿：electrobun 传入的 frame 是逻辑像素，但 CEF 未设置 Per-Monitor DPI Aware
+  // 导致系统将窗口按 scaleFactor 放大，需要除以 scaleFactor 还原到期望的视觉尺寸
+  const scaleFactor = process.platform === "win32"
+    ? (Screen.getPrimaryDisplay()?.scaleFactor ?? 1)
+    : 1;
+  const W = Math.round(1280 / scaleFactor);
+  const H = Math.round(860 / scaleFactor);
+  const minW = Math.round(1000 / scaleFactor);
+  const minH = Math.round(600 / scaleFactor);
+
   win = new BrowserWindow({
     title: "USB 设备查看器",
     url,
-    frame: { width: 1280, height: 860, minWidth: 1000, minHeight: 600 },
+    frame: { width: W, height: H, minWidth: minW, minHeight: minH },
     rpc,
   });
 
