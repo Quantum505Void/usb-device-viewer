@@ -474,7 +474,7 @@
   .nav-item.active .nav-icon { filter: none; }
   .nav-icon { font-size: 14px; flex-shrink: 0; opacity: 0.7; }
   .nav-item.active .nav-icon { opacity: 1; }
-  .nav-label { flex: 1; font-weight: 500; }
+  .nav-label { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nav-count {
     font-size: 11px;
     font-weight: 600;
