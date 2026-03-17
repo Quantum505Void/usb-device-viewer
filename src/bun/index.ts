@@ -1,8 +1,9 @@
 import { BrowserWindow, BrowserView, Tray, Utils, GlobalShortcut, Updater } from "electrobun/bun";
 import type { AppRPCType, HIDDevice } from "../shared/types";
 import { join } from "path";
+import * as fs from "fs";
 import net from "net";
-import { enumerateDevices, closeLib } from "./hid-ffi";
+import { enumerateDevices, closeLib } from "./hid-backend";
 
 // ─── Electrobun 原生 API ──────────────────────────────────────────────────────
 const { clipboardWriteText, showNotification, showItemInFolder, paths, quit } = Utils;
