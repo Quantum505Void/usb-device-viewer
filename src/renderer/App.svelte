@@ -219,7 +219,7 @@
       </div>
       <div class="logo-text-wrap">
         <span class="logo-main">USB<em>View</em></span>
-        <span class="logo-ver">v3.0</span>
+        <span class="logo-ver">v3.1</span>
       </div>
     </div>
 

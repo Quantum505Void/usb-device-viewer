@@ -24,7 +24,7 @@ export default {
     },
     // 确保 .node 文件不被 ASAR 打包（需要以文件形式存在才能被 require）
     asarUnpack: ["*.node", "*.dll", "*.dylib", "*.so", "*.so.*"],
-    watchIgnore: ["dist/**"],
+    watchIgnore: ["dist/**", "build/**"],
     platforms: {
       mac: {
         icons: "icon.iconset",
