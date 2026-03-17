@@ -351,7 +351,7 @@
   }
 
   .app {
-    height: 100vh;
+    height: 100%;
     display: flex;
     background: #0d0d12;
   }
