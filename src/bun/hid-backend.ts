@@ -113,11 +113,16 @@ function getBusInfo(dev: HID.Device): { label: string; isBluetooth: boolean } {
 }
 
 // ── 同一物理设备去重 ──────────────────────────────────────────────────────────
-// 同一设备可能有多个 HID interface / usagePage，node-hid 每个都列一条
-// 用 path 去重（同一 hidraw 节点 = 同一物理接口）
+// Windows: HID path 每个 interface 都不同（\\?\HID#VID_0B05&PID_1A96&MI_00#...）
+//          → 用 VID:PID:serial 去重（同一物理设备多 interface 只保留第一条）
+// Linux:   path = /dev/hidrawX，每个 hidraw 节点是独立接口，直接用 path
+// macOS:   path = IOKit service path，唯一
 
 function getDedupeKey(dev: HID.Device): string {
-  if (dev.path) return dev.path;
+  if (process.platform === "linux" && dev.path) {
+    return dev.path; // /dev/hidrawX 天然唯一
+  }
+  // Windows / macOS：VID:PID:serial（serial 通常能区分物理设备）
   const serial = dev.serialNumber?.trim() || "";
   return `${dev.vendorId}:${dev.productId}:${serial}`;
 }

@@ -14,7 +14,10 @@
   };
   let { devices, newDeviceIds, query = "", selected = $bindable(), nowMs, deviceOnlineTime, fmtDuration, onOpen, onCopy }: Props = $props();
 
-  function getId(d: HIDDevice) { return `${d.vid}:${d.pid}:${d.serial}`; }
+  // 优先用 path（最唯一），fallback VID:PID:serial:index 防止 Svelte each_key_duplicate
+  function getId(d: HIDDevice, i: number) {
+    return d.path || `${d.vid}:${d.pid}:${d.serial}:${i}`;
+  }
 
   // ── 分组（支持折叠）──
   let collapsedGroups = $state<Set<string>>(new Set());
@@ -101,7 +104,7 @@
         {/if}
 
         {#if !collapsed}
-          {#each group.items as dev, i (getId(dev))}
+          {#each group.items as dev, i (getId(dev, i))}
             {@const id = getId(dev)}
             {@const isNew = newDeviceIds.has(id)}
             {@const isSelected = selected && getId(selected) === id}

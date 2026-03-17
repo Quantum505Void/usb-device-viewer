@@ -41,10 +41,11 @@ if (!await setupSingleInstance()) {
 
 // ─── HID 扫描（via node-hid）────────────────────────────────────────────────
 
-// 用 path 作为唯一 ID（与 hid-backend dedup key 一致）
-// path 为空时 fallback VID:PID:serial（Windows BT 设备可能没有 path）
+// 热插拔唯一 ID：Linux 用 path（hidrawX 级），其他平台用 VID:PID:serial
+// 与 hid-backend dedup key 保持一致
 function deviceId(d: HIDDevice) {
-  return d.path || `${d.vid}:${d.pid}:${d.serial}`;
+  if (process.platform === "linux" && d.path) return d.path;
+  return `${d.vid}:${d.pid}:${d.serial}`;
 }
 
 async function scanDevices(): Promise<HIDDevice[]> {
